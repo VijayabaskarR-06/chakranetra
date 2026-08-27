@@ -73,7 +73,7 @@ function letterbox(imgEl) {
   const nw = Math.round(w * scale), nh = Math.round(h * scale);
   const dx = Math.floor((INPUT - nw) / 2), dy = Math.floor((INPUT - nh) / 2);
   ctx.drawImage(imgEl, dx, dy, nw, nh);
-  return { canvas: c, ctx, scale, dx, dy, srcW: w, srcH: h };
+  return { canvas: c, ctx, scale, dx, dy, nw, nh, srcW: w, srcH: h };
 }
 
 function toTensor(ctx) {
@@ -224,7 +224,16 @@ export async function detect(imgEl, confThres = 0.35, iouThres = 0.7) {
   return { detections, letterbox: lb };
 }
 
-/** Draw masks + boxes onto a canvas sized to the letterboxed frame. */
+/**
+ * Draw masks + boxes, then crop the letterbox padding away.
+ *
+ * Inference happens on a 640x640 letterboxed frame, so a non-square photo is
+ * padded with grey. Rendering that padded frame would show the viewer their
+ * photo inside grey bars and make the highlight look loosely placed. Masks are
+ * composited in letterbox space (where they are pixel-exact) and the result is
+ * then cropped back to the photo's own region, so the highlight lands exactly
+ * on the hole in the image the viewer actually supplied.
+ */
 export function renderOverlay(lb, detections) {
   const c = document.createElement("canvas");
   c.width = INPUT; c.height = INPUT;
@@ -257,5 +266,14 @@ export function renderOverlay(lb, detections) {
     ctx.fillStyle = "#fff";
     ctx.fillText(label, x1 + 5, Math.max(14, y1 - 5));
   }
-  return c;
+
+  // Crop off the grey letterbox padding.
+  const nw = lb.nw ?? INPUT, nh = lb.nh ?? INPUT;
+  const dx = lb.dx ?? 0, dy = lb.dy ?? 0;
+  if (nw === INPUT && nh === INPUT) return c;
+
+  const out = document.createElement("canvas");
+  out.width = nw; out.height = nh;
+  out.getContext("2d").drawImage(c, dx, dy, nw, nh, 0, 0, nw, nh);
+  return out;
 }

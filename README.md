@@ -29,15 +29,28 @@ changes persist across reloads, and every view is deep-linkable
 that come out of them. This is the same 45 MB YOLOv8s-seg network the Python
 pipeline uses, exported to ONNX and run with onnxruntime-web.*
 
+![Mask parity: ultralytics vs the browser](docs/screenshots/mask-parity.png)
+
+*Left, ultralytics' own `result.plot()`. Centre, the browser's render. Right, the
+mask itself. They are not merely similar — the masks are **pixel-identical**:
+`IoU 1.000000`, **0 differing pixels**, including the gaps where gravel shows
+through the middle of the hole. Equal mask *area* would not have proved this, so
+the test compares the masks themselves.*
+
 Duplicating a scoring engine into JavaScript is how demos start lying, so the
 port is pinned down by tests rather than trust:
 
 | Check | What it proves |
 |---|---|
 | `tools/check_onnx_parity.py` | The ONNX graph reproduces **ultralytics** — `area_ratio` delta `0.000000` across the sample set |
-| `tests/test_js_inference_parity.py` | `dashboard/scan.js` reproduces the Python post-processing — boxes, confidences and `area_ratio` to `1e-9` |
+| `tests/test_js_inference_parity.py` | `dashboard/scan.js` reproduces the Python post-processing — boxes, confidences and `area_ratio` to `1e-9`, and every mask **pixel for pixel** (0 differing pixels) |
 | `tests/test_js_parity.py` | The JS scoring matches `roadlens.severity.assess` on 2 000 random inputs plus every band boundary |
 | `tests/test_js_parity.py` | `dashboard/rules.generated.js` is regenerated from `config.yaml`, and CI fails if it goes stale |
+
+A non-square photo is letterboxed to 640×640 for inference, so the overlay is
+composited in letterbox space — where the mask is pixel-exact — and then cropped
+back to the photo's own aspect ratio. A 960×540 upload renders as 640×360 with no
+grey bars, so the highlight lands exactly on the hole in the image you supplied.
 
 One subtlety that mattered: ultralytics crops and thresholds mask **logits**
 (`> 0`), not sigmoid probabilities (`> 0.5`). Because sigmoid is non-linear,

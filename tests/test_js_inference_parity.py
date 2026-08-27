@@ -58,15 +58,17 @@ def test_js_postprocessing_matches_python_reference(tmp_path):
             fh.write(o0.astype(np.float32).tobytes())
             fh.write(o1.astype(np.float32).tobytes())
 
+        mask_path = tmp_path / "masks.bin"
         script = f"""
 import {{ postprocessRaw }} from {json.dumps(SCAN_JS)};
-import {{ readFileSync }} from "node:fs";
+import {{ readFileSync, writeFileSync }} from "node:fs";
 const buf = readFileSync({json.dumps(str(bin_path))});
 const n0 = {o0.size}, n1 = {o1.size};
 const ab = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
 const d0 = new Float32Array(ab, 0, n0);
 const d1 = new Float32Array(ab, n0 * 4, n1);
 const dets = postprocessRaw(d0, {json.dumps(list(o0.shape))}, d1, 0.35, 0.7);
+writeFileSync({json.dumps(str(mask_path))}, Buffer.concat(dets.map(d => Buffer.from(d.mask))));
 process.stdout.write(JSON.stringify(dets.map(d => ({{
   box: d.box, confidence: d.confidence, area_ratio: d.area_ratio,
 }}))));
@@ -90,5 +92,18 @@ process.stdout.write(JSON.stringify(dets.map(d => ({{
             assert abs(g["area_ratio"] - w["area_ratio"]) < 1e-9, (
                 f"{name}: area_ratio {g['area_ratio']} vs {w['area_ratio']}")
             compared += 1
+
+        # Equal area does not mean equal mask — two different shapes can cover
+        # the same pixel count. Compare the masks themselves, pixel for pixel,
+        # so the highlighted region is provably the region the model found.
+        js_masks = np.fromfile(mask_path, dtype=np.uint8).reshape(len(want), 640, 640)
+        order = np.argsort([-d["confidence"] for d in want])
+        for slot, wi in enumerate(order):
+            wm = want[wi]["mask"].astype(np.uint8)
+            jm = js_masks[slot]
+            differing = int(np.count_nonzero(wm ^ jm))
+            union = int(np.count_nonzero(wm | jm))
+            iou = (int(np.count_nonzero(wm & jm)) / union) if union else 1.0
+            assert differing == 0, f"{name}: {differing} mask pixels differ (IoU {iou:.6f})"
 
     assert compared >= 7, f"only compared {compared} detections"
