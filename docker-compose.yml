@@ -1,0 +1,26 @@
+services:
+  roadlens:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+      - ./output:/app/output
+      # Mount a DIRECTORY for the database, never the .db file itself:
+      # bind-mounting a file that does not yet exist on the host makes Docker
+      # create a directory at that path, and SQLite then fails to open it.
+      - ./dbdata:/app/dbdata
+    environment:
+      - ROADLENS_LOG_LEVEL=INFO
+      - ROADLENS_CONFIG=/app/config.yaml
+      - ROADLENS_DB_PATH=/app/dbdata/roadlens.db
+    healthcheck:
+      # python:3.11-slim ships no curl, so the previous curl-based check
+      # always reported the container unhealthy.
+      test: ["CMD", "python", "-c",
+             "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/api/stats', timeout=5).status == 200 else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped

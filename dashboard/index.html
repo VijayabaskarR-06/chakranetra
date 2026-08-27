@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>RoadLens AI — Road Operations Console</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Saira+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
+<style>
+  /* ── Asphalt & road-marking design tokens ─────────────────────────── */
+  :root {
+    --asphalt:  #101418;   /* page — wet asphalt at night */
+    --surface:  #181E25;   /* panels */
+    --surface2: #1F2630;   /* raised rows */
+    --line:     #2A323C;   /* hairlines */
+    --marking:  #F7B500;   /* road-marking yellow — the accent */
+    --chalk:    #E9EDF2;   /* primary text */
+    --faded:    #8B96A3;   /* secondary text */
+    --sev4: #FF4A3A;  --sev3: #FF9330;  --sev2: #F5C84C;  --sev1: #6FA8DC;
+    --ok: #36C98E;
+    --mono: "IBM Plex Mono", monospace;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  html, body { height: 100%; }
+  body {
+    background: var(--asphalt); color: var(--chalk);
+    font: 14px/1.5 "IBM Plex Sans", system-ui, sans-serif;
+    display: flex; flex-direction: column;
+  }
+  button, select { font: inherit; }
+  :focus-visible { outline: 2px solid var(--marking); outline-offset: 2px; }
+
+  /* ── Header: hazard-tape strip is the signature ───────────────────── */
+  header {
+    border-bottom: 1px solid var(--line);
+    background: var(--surface);
+  }
+  .hazard-tape {
+    height: 6px;
+    background: repeating-linear-gradient(-45deg,
+      var(--marking) 0 14px, #14181d 14px 28px);
+  }
+  .head-row {
+    display: flex; align-items: center; gap: 20px; flex-wrap: wrap;
+    padding: 14px 22px;
+  }
+  .brand { display: flex; align-items: baseline; gap: 10px; }
+  .brand h1 {
+    font-family: "Saira Condensed", sans-serif; font-weight: 700;
+    font-size: 26px; letter-spacing: .04em; text-transform: uppercase;
+  }
+  .brand h1 span { color: var(--marking); }
+  .brand .zone {
+    font-family: var(--mono); font-size: 12px; color: var(--faded);
+    border: 1px solid var(--line); border-radius: 3px; padding: 2px 8px;
+  }
+  .stats { display: flex; gap: 10px; margin-left: auto; flex-wrap: wrap; }
+  .stat {
+    background: var(--asphalt); border: 1px solid var(--line); border-radius: 6px;
+    padding: 6px 14px; min-width: 96px;
+  }
+  .stat b {
+    display: block; font-family: "Saira Condensed", sans-serif;
+    font-size: 24px; font-weight: 600; line-height: 1.1;
+  }
+  .stat span { font-size: 11px; color: var(--faded); text-transform: uppercase; letter-spacing: .06em; }
+  .stat.crit b { color: var(--sev4); }
+  .stat.due  b { color: var(--sev3); }
+  .stat.cost b { color: var(--marking); }
+  .stat.done b { color: var(--ok); }
+
+  /* ── Main split: map + work queue ─────────────────────────────────── */
+  main { flex: 1; display: flex; min-height: 0; }
+  #map { flex: 1.35; min-width: 0; background: #0b0e11; }
+  aside {
+    flex: 1; min-width: 380px; max-width: 560px;
+    border-left: 1px solid var(--line); background: var(--surface);
+    display: flex; flex-direction: column; min-height: 0;
+  }
+  .queue-head {
+    padding: 14px 18px 10px; border-bottom: 1px solid var(--line);
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  }
+  .queue-head h2 {
+    font-family: "Saira Condensed", sans-serif; font-size: 17px;
+    font-weight: 600; letter-spacing: .08em; text-transform: uppercase;
+  }
+  .queue-head select {
+    background: var(--asphalt); color: var(--chalk);
+    border: 1px solid var(--line); border-radius: 5px; padding: 5px 8px;
+    font-size: 12px;
+  }
+  #list { overflow-y: auto; padding: 10px 12px 20px; flex: 1; }
+
+  /* ── Ticket card ──────────────────────────────────────────────────── */
+  .ticket {
+    background: var(--surface2); border: 1px solid var(--line);
+    border-left: 4px solid var(--sev2); border-radius: 7px;
+    padding: 11px 14px; margin-bottom: 9px; cursor: pointer;
+    transition: border-color .15s;
+  }
+  .ticket:hover, .ticket.active { border-color: var(--marking); }
+  .ticket[data-sev="4"] { border-left-color: var(--sev4); }
+  .ticket[data-sev="3"] { border-left-color: var(--sev3); }
+  .ticket[data-sev="2"] { border-left-color: var(--sev2); }
+  .ticket[data-sev="1"] { border-left-color: var(--sev1); }
+
+  .t-top { display: flex; align-items: center; gap: 10px; }
+  .t-id { font-family: var(--mono); font-size: 13px; font-weight: 500; }
+  .chip {
+    font-size: 10px; font-weight: 600; letter-spacing: .07em;
+    text-transform: uppercase; border-radius: 3px; padding: 2px 7px;
+    color: #14181d;
+  }
+  .chip.s4 { background: var(--sev4); color: #fff; }
+  .chip.s3 { background: var(--sev3); }
+  .chip.s2 { background: var(--sev2); }
+  .chip.s1 { background: var(--sev1); color: #fff; }
+  .t-status {
+    margin-left: auto; font-family: var(--mono); font-size: 11px;
+    color: var(--faded);
+  }
+  .t-status.done { color: var(--ok); }
+
+  .t-mid {
+    display: flex; gap: 16px; margin-top: 7px; font-size: 12px;
+    color: var(--faded); flex-wrap: wrap;
+  }
+  .t-mid b { color: var(--chalk); font-weight: 500; }
+
+  .t-bottom { display: flex; align-items: center; gap: 12px; margin-top: 9px; }
+  .prio-track {
+    flex: 1; height: 5px; background: var(--asphalt); border-radius: 3px;
+    overflow: hidden;
+  }
+  .prio-fill { height: 100%; background: var(--marking); }
+  .sla { font-family: var(--mono); font-size: 11px; color: var(--faded); white-space: nowrap; }
+  .sla.overdue { color: var(--sev4); }
+  .t-bottom select {
+    background: var(--asphalt); color: var(--chalk); font-size: 11px;
+    border: 1px solid var(--line); border-radius: 4px; padding: 3px 6px;
+  }
+
+  .empty { color: var(--faded); text-align: center; padding: 60px 20px; }
+  .src-note {
+    padding: 8px 18px; font-size: 11px; color: var(--faded);
+    border-top: 1px solid var(--line); font-family: var(--mono);
+  }
+
+  /* Critical map markers pulse — unless the viewer prefers less motion */
+  @keyframes pulse { 0%{box-shadow:0 0 0 0 rgba(255,74,58,.55)} 100%{box-shadow:0 0 0 16px rgba(255,74,58,0)} }
+  .pin { border-radius: 50%; border: 2px solid #fff; }
+  .pin.s4 { animation: pulse 1.6s ease-out infinite; }
+  @media (prefers-reduced-motion: reduce) { .pin.s4 { animation: none; } }
+
+  @media (max-width: 900px) {
+    main { flex-direction: column; }
+    #map { min-height: 320px; flex: none; height: 42vh; }
+    aside { max-width: none; border-left: 0; border-top: 1px solid var(--line); }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="hazard-tape" aria-hidden="true"></div>
+  <div class="head-row">
+    <div class="brand">
+      <h1>Road<span>Lens</span> AI</h1>
+      <span class="zone" id="zone">BENGALURU · ORR PILOT</span>
+    </div>
+    <div class="stats" id="stats" aria-label="City road health summary"></div>
+  </div>
+</header>
+
+<main>
+  <div id="map" role="application" aria-label="Defect map"></div>
+  <aside>
+    <div class="queue-head">
+      <h2>Work queue</h2>
+      <select id="f-status" aria-label="Filter by status">
+        <option value="">All statuses</option>
+      </select>
+      <select id="f-dept" aria-label="Filter by department">
+        <option value="">All departments</option>
+      </select>
+    </div>
+    <div id="list"></div>
+    <div class="src-note" id="src-note">connecting…</div>
+  </aside>
+</main>
+
+<script src="demo_data.js" onerror="void 0"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const STATUSES = ["OPEN","ASSIGNED","IN_PROGRESS","FIXED","VERIFIED","REOPENED"];
+const SEV_COLORS = {4:"#FF4A3A",3:"#FF9330",2:"#F5C84C",1:"#6FA8DC"};
+const state = { tickets: [], stats: {}, live: false, activeId: null };
+
+/* ── Data: live API first, embedded demo data as fallback ───────────── */
+async function loadData() {
+  try {
+    const [t, s] = await Promise.all([
+      fetch("/api/tickets").then(r => { if (!r.ok) throw 0; return r.json(); }),
+      fetch("/api/stats").then(r => r.json()),
+    ]);
+    state.tickets = t; state.stats = s; state.live = true;
+  } catch {
+    if (window.ROADLENS_DEMO) {
+      state.tickets = window.ROADLENS_DEMO.tickets;
+      state.stats = window.ROADLENS_DEMO.stats;
+    }
+  }
+  document.getElementById("src-note").textContent = state.live
+    ? "live · connected to RoadLens API"
+    : "demo data · run `uvicorn server.app:app` for live mode";
+}
+
+/* ── Map ────────────────────────────────────────────────────────────── */
+let map, markers = {};
+function initMap() {
+  map = L.map("map", { zoomControl: true });
+  L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+    attribution: "&copy; OpenStreetMap &copy; CARTO", maxZoom: 19,
+  }).addTo(map);
+}
+function drawMarkers() {
+  Object.values(markers).forEach(m => m.remove());
+  markers = {};
+  const pts = [];
+  for (const t of state.tickets) {
+    if (t.lat == null || t.lon == null) continue;
+    pts.push([t.lat, t.lon]);
+    const done = ["FIXED","VERIFIED"].includes(t.status);
+    const color = done ? "#36C98E" : SEV_COLORS[t.severity_level];
+    const size = 10 + t.severity_level * 3;
+    const icon = L.divIcon({
+      className: "",
+      html: `<div class="pin ${done ? "" : "s" + t.severity_level}"
+        style="width:${size}px;height:${size}px;background:${color}"></div>`,
+      iconSize: [size, size], iconAnchor: [size/2, size/2],
+    });
+    markers[t.id] = L.marker([t.lat, t.lon], { icon })
+      .addTo(map)
+      .bindPopup(
+        `<b style="font-family:monospace">${t.id}</b><br>` +
+        `${t.severity_label} ${t.defect_type} · seen ${t.sightings}× ` +
+        `· est ₹${(t.est_cost_inr ?? 0).toLocaleString("en-IN")}<br>${t.department}`
+      )
+      .on("click", () => selectTicket(t.id, false));
+  }
+  if (pts.length) map.fitBounds(pts, { padding: [40, 40] });
+  else map.setView([12.9716, 77.5946], 12);
+}
+
+/* ── Stats strip ────────────────────────────────────────────────────── */
+function drawStats() {
+  const s = state.stats;
+  const cost = (s.est_backlog_cost_inr ?? 0).toLocaleString("en-IN");
+  document.getElementById("stats").innerHTML = `
+    <div class="stat"><b>${s.open ?? 0}</b><span>Open tickets</span></div>
+    <div class="stat crit"><b>${s.critical_open ?? 0}</b><span>Critical open</span></div>
+    <div class="stat due"><b>${s.overdue_sla ?? 0}</b><span>Past SLA</span></div>
+    <div class="stat cost"><b>₹${cost}</b><span>Backlog cost</span></div>
+    <div class="stat done"><b>${s.fixed_or_verified ?? 0}</b><span>Fixed</span></div>`;
+}
+
+/* ── Work queue ─────────────────────────────────────────────────────── */
+function slaText(t) {
+  if (["FIXED","VERIFIED"].includes(t.status)) return { txt: "closed", overdue: false };
+  const ms = new Date(t.sla_due_at) - Date.now();
+  const h = Math.abs(ms) / 36e5;
+  const span = h >= 48 ? Math.round(h/24) + "d" : Math.round(h) + "h";
+  return ms < 0 ? { txt: "SLA +" + span + " over", overdue: true }
+                : { txt: "SLA in " + span, overdue: false };
+}
+
+function drawList() {
+  const fs = document.getElementById("f-status").value;
+  const fd = document.getElementById("f-dept").value;
+  const rows = state.tickets.filter(t =>
+    (!fs || t.status === fs) && (!fd || t.department === fd));
+
+  const list = document.getElementById("list");
+  if (!rows.length) {
+    list.innerHTML = `<div class="empty">No tickets match these filters.<br>
+      Clear a filter, or run <code>python run_demo.py</code> to scan the sample trip.</div>`;
+    return;
+  }
+  list.innerHTML = rows.map(t => {
+    const sla = slaText(t);
+    const done = ["FIXED","VERIFIED"].includes(t.status);
+    return `
+    <div class="ticket ${t.id===state.activeId?"active":""}" data-sev="${t.severity_level}"
+         data-id="${t.id}" tabindex="0" role="button"
+         aria-label="Ticket ${t.id}, ${t.severity_label}">
+      <div class="t-top">
+        <span class="t-id">${t.id}</span>
+        <span class="chip s${t.severity_level}">${t.severity_label}</span>
+        <span class="t-status ${done?"done":""}">${t.status.replace("_"," ")}</span>
+      </div>
+      <div class="t-mid">
+        <span><b>${t.defect_type}</b> · seen <b>${t.sightings}×</b></span>
+        <span>est <b>₹${(t.est_cost_inr ?? 0).toLocaleString("en-IN")}</b></span>
+        <span>${t.department}</span>
+        ${t.assigned_to ? `<span>→ <b>${t.assigned_to}</b></span>` : ""}
+      </div>
+      <div class="t-bottom">
+        <div class="prio-track" title="Priority ${t.priority_score}/100">
+          <div class="prio-fill" style="width:${t.priority_score}%"></div>
+        </div>
+        <span class="sla ${sla.overdue?"overdue":""}">${sla.txt}</span>
+        <select data-move="${t.id}" aria-label="Move ${t.id} to status">
+          ${STATUSES.map(s => `<option ${s===t.status?"selected":""}>${s}</option>`).join("")}
+        </select>
+      </div>
+    </div>`;
+  }).join("");
+}
+
+function drawFilters() {
+  const depts = [...new Set(state.tickets.map(t => t.department))];
+  const fd = document.getElementById("f-dept");
+  fd.innerHTML = `<option value="">All departments</option>` +
+    depts.map(d => `<option>${d}</option>`).join("");
+  const fs = document.getElementById("f-status");
+  fs.innerHTML = `<option value="">All statuses</option>` +
+    STATUSES.map(s => `<option>${s}</option>`).join("");
+}
+
+function selectTicket(id, pan = true) {
+  state.activeId = id;
+  drawList();
+  const t = state.tickets.find(x => x.id === id);
+  if (t && pan && markers[id]) {
+    map.setView([t.lat, t.lon], Math.max(map.getZoom(), 16));
+    markers[id].openPopup();
+  }
+  const el = document.querySelector(`.ticket[data-id="${id}"]`);
+  if (el) el.scrollIntoView({ block: "nearest" });
+}
+
+/* ── Status changes: hit the API when live, local-only in demo mode ── */
+async function moveTicket(id, status) {
+  if (state.live) {
+    try {
+      const r = await fetch(`/api/tickets/${id}/status`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status, note: "Updated from console" }),
+      });
+      const body = await r.json();
+      // Without this check an error payload ({detail: "..."}) was written
+      // straight into state.tickets, and the next render blew up on
+      // undefined.est_cost_inr — the whole console went blank.
+      if (!r.ok) throw new Error(body.detail || `HTTP ${r.status}`);
+      const i = state.tickets.findIndex(t => t.id === id);
+      if (i === -1) throw new Error("Ticket vanished from the local queue");
+      state.tickets[i] = body;
+    } catch (err) {
+      const note = document.getElementById("src-note");
+      if (note) note.textContent = `update failed: ${err.message}`;
+      drawList();
+      return;
+    }
+  } else {
+    const t = state.tickets.find(t => t.id === id);
+    if (!t) return;
+    t.status = status;
+  }
+  drawList(); drawMarkers(); recomputeLocalStats();
+}
+function recomputeLocalStats() {
+  if (state.live) { fetch("/api/stats").then(r=>r.json()).then(s=>{state.stats=s;drawStats();}); return; }
+  const open = state.tickets.filter(t => !["FIXED","VERIFIED"].includes(t.status));
+  state.stats = {
+    open: open.length,
+    critical_open: open.filter(t => t.severity_level === 4).length,
+    overdue_sla: open.filter(t => new Date(t.sla_due_at) < Date.now()).length,
+    est_backlog_cost_inr: open.reduce((a,t) => a + t.est_cost_inr, 0),
+    fixed_or_verified: state.tickets.length - open.length,
+  };
+  drawStats();
+}
+
+/* ── Events ─────────────────────────────────────────────────────────── */
+document.addEventListener("click", e => {
+  const card = e.target.closest(".ticket");
+  if (card && !e.target.matches("select")) selectTicket(card.dataset.id);
+});
+document.addEventListener("keydown", e => {
+  if (e.key === "Enter") {
+    const card = e.target.closest?.(".ticket");
+    if (card) selectTicket(card.dataset.id);
+  }
+});
+document.addEventListener("change", e => {
+  if (e.target.dataset.move) moveTicket(e.target.dataset.move, e.target.value);
+  if (e.target.id === "f-status" || e.target.id === "f-dept") drawList();
+});
+
+/* ── Boot ───────────────────────────────────────────────────────────── */
+(async function () {
+  initMap();
+  await loadData();
+  drawFilters(); drawStats(); drawList(); drawMarkers();
+})();
+</script>
+</body>
+</html>

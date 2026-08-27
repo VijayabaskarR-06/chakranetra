@@ -1,0 +1,10 @@
+# RoadLens AI — everything runs on CPU, no GPU or API keys needed
+ultralytics>=8.2          # YOLOv8 inference
+huggingface_hub>=0.23     # one-time model download (then cached)
+opencv-python-headless>=4.9
+fastapi>=0.111
+uvicorn>=0.30
+python-multipart>=0.0.9   # file uploads
+pyyaml>=6.0               # configuration management
+pytest>=7.0               # testing
+pytest-cov>=4.0           # test coverage

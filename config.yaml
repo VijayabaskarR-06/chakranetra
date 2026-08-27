@@ -1,0 +1,22 @@
+# RoadLens AI — Configuration
+# Override any value via environment variables (ROADLENS_ prefix)
+# or by setting ROADLENS_CONFIG to point to a custom file.
+
+detector:
+  confidence_threshold: 0.35
+  video_sample_every_n_frames: 15
+
+dedup:
+  merge_radius_meters: 12.0
+
+predictive:
+  recurrence_radius_meters: 15.0
+  monitoring_window_days: 90
+  high_recurrence_threshold: 2
+  critical_recurrence_threshold: 4
+  heatmap_grid_size_km: 0.5
+  risk_segment_radius_meters: 500.0
+
+db_path: roadlens.db
+log_level: INFO
+log_format: json
