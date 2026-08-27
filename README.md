@@ -11,9 +11,20 @@ the civic workflow. For live image scanning, run the API locally (see Quickstart
 ![Chakranetra operations console](docs/screenshots/dashboard.png)
 
 *The live console. Seven deduplicated defects plotted along Bengaluru's Outer Ring Road,
-coloured by severity — red L4 Critical, amber L3 High, green repaired. The work queue on
-the right is sorted by priority score, each row carrying its estimated cost, assigned
-engineer and SLA countdown.*
+coloured by severity — red L4 Critical, amber L3 High, green repaired. Search, filter and
+sort the queue; SLA countdowns tick live; click any ticket for its full lifecycle. Status
+changes persist across reloads, and every view is deep-linkable
+(`#predict`, `#crews`, `#t/RL-POT-2026-0003`).*
+
+### Predictive board — the accountability loop closing
+
+![Predictive maintenance board](docs/screenshots/predictive.png)
+
+*Ticket `#0003` was patched, then two later vehicle passes still detected a defect within
+15 m of the repaired spot. The engine recorded both recurrences, dropped the repair-quality
+score to 0.5, reopened the ticket and raised a repair-quality alert against the crew — no
+human filed any of that. Risk segments come from the same pass: a 500 m stretch carrying six
+defects scores 0.59 and earns a preventive-overlay recommendation before anyone complains.*
 
 ### What the model actually sees
 

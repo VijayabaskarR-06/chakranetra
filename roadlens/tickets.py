@@ -119,7 +119,7 @@ class TicketStore:
             "sla_due_at": sla_due.isoformat(),
             "assigned_to": None,
             "status_history": json.dumps(
-                [{"status": "OPEN", "at": now.isoformat(), "note": "Auto-created by RoadLens AI"}]
+                [{"status": "OPEN", "at": now.isoformat(), "note": "Auto-created by Chakranetra"}]
             ),
             "recurrence_count": 0,
             "repair_quality_score": 1.0,

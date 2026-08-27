@@ -94,16 +94,16 @@ def get_detector():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("RoadLens API starting up")
+    logger.info("Chakranetra API starting up")
     yield
-    logger.info("RoadLens API shutting down")
+    logger.info("Chakranetra API shutting down")
     if store:
         store.conn.close()
     if predictive:
         predictive.conn.close()
 
 
-app = FastAPI(title="RoadLens AI", version="2.0.0", lifespan=lifespan)
+app = FastAPI(title="Chakranetra", version="2.0.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,

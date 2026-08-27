@@ -161,6 +161,126 @@
   .pin.s4 { animation: pulse 1.6s ease-out infinite; }
   @media (prefers-reduced-motion: reduce) { .pin.s4 { animation: none; } }
 
+  /* ── Tabs ─────────────────────────────────────────────────────────── */
+  .tabs { display: flex; gap: 4px; width: 100%; }
+  .tab {
+    background: none; border: 0; border-bottom: 2px solid transparent;
+    color: var(--faded); padding: 6px 12px 8px; cursor: pointer;
+    font-family: "Saira Condensed", sans-serif; font-size: 15px;
+    letter-spacing: .07em; text-transform: uppercase;
+  }
+  .tab:hover { color: var(--chalk); }
+  .tab[aria-selected="true"] { color: var(--marking); border-bottom-color: var(--marking); }
+  .tab .count {
+    font-family: var(--mono); font-size: 10px; background: var(--asphalt);
+    border: 1px solid var(--line); border-radius: 8px; padding: 1px 6px; margin-left: 6px;
+  }
+  .panel { display: none; overflow-y: auto; padding: 10px 12px 20px; flex: 1; }
+  .panel.active { display: block; }
+
+  .ctl-row { display: flex; gap: 8px; padding: 0 18px 10px; flex-wrap: wrap; align-items: center; }
+  .ctl-row input, .ctl-row select {
+    background: var(--asphalt); color: var(--chalk); border: 1px solid var(--line);
+    border-radius: 5px; padding: 5px 8px; font-size: 12px;
+  }
+  .ctl-row input { flex: 1; min-width: 120px; font-family: var(--mono); }
+  .ghost-btn {
+    background: none; color: var(--faded); border: 1px solid var(--line);
+    border-radius: 5px; padding: 5px 9px; font-size: 11px; cursor: pointer;
+  }
+  .ghost-btn:hover { color: var(--marking); border-color: var(--marking); }
+
+  /* ── Predictive + crew cards ──────────────────────────────────────── */
+  .card {
+    background: var(--surface2); border: 1px solid var(--line);
+    border-left: 4px solid var(--sev2); border-radius: 7px;
+    padding: 12px 14px; margin-bottom: 9px;
+  }
+  .card.critical { border-left-color: var(--sev4); }
+  .card.high     { border-left-color: var(--sev3); }
+  .card.medium   { border-left-color: var(--sev2); }
+  .card.low      { border-left-color: var(--sev1); }
+  .card h3 {
+    font-size: 13px; font-weight: 600; display: flex; align-items: center;
+    gap: 9px; margin-bottom: 6px;
+  }
+  .card p { font-size: 12px; color: var(--faded); line-height: 1.55; }
+  .card .kv { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 8px; font-size: 12px; color: var(--faded); }
+  .card .kv b { color: var(--chalk); font-weight: 500; }
+
+  .meter { height: 6px; background: var(--asphalt); border-radius: 3px; overflow: hidden; margin-top: 8px; }
+  .meter i { display: block; height: 100%; background: var(--marking); }
+  .meter i.good { background: var(--ok); }
+  .meter i.bad  { background: var(--sev4); }
+
+  .section-label {
+    font-family: var(--mono); font-size: 10px; letter-spacing: .12em;
+    text-transform: uppercase; color: var(--faded); margin: 14px 2px 8px;
+  }
+
+  /* ── Severity distribution bar ────────────────────────────────────── */
+  .dist { display: flex; height: 10px; border-radius: 3px; overflow: hidden; margin-bottom: 4px; }
+  .dist span { display: block; }
+  .dist-key { display: flex; gap: 12px; font-size: 11px; color: var(--faded); flex-wrap: wrap; }
+  .dist-key i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 5px; }
+
+  /* ── Ticket detail drawer ─────────────────────────────────────────── */
+  .drawer {
+    position: fixed; inset: 0 0 0 auto; width: min(430px, 100%);
+    background: var(--surface); border-left: 1px solid var(--line);
+    transform: translateX(100%); transition: transform .22s ease;
+    z-index: 1200; display: flex; flex-direction: column;
+    box-shadow: -18px 0 44px rgba(0,0,0,.5);
+  }
+  .drawer.open { transform: translateX(0); }
+  .drawer-head {
+    padding: 16px 18px; border-bottom: 1px solid var(--line);
+    display: flex; align-items: center; gap: 10px;
+  }
+  .drawer-head .t-id { font-size: 15px; }
+  .drawer-body { overflow-y: auto; padding: 16px 18px 28px; }
+  .drawer .close {
+    margin-left: auto; background: none; border: 0; color: var(--faded);
+    font-size: 22px; line-height: 1; cursor: pointer; padding: 0 4px;
+  }
+  .drawer .close:hover { color: var(--marking); }
+  .facts { display: grid; grid-template-columns: auto 1fr; gap: 7px 16px; font-size: 12.5px; }
+  .facts dt { color: var(--faded); }
+  .facts dd { color: var(--chalk); font-family: var(--mono); font-size: 12px; }
+
+  .timeline { list-style: none; margin-top: 8px; }
+  .timeline li {
+    position: relative; padding: 0 0 16px 20px;
+    border-left: 1px solid var(--line); font-size: 12px;
+  }
+  .timeline li:last-child { border-left-color: transparent; padding-bottom: 0; }
+  .timeline li::before {
+    content: ""; position: absolute; left: -5px; top: 3px;
+    width: 9px; height: 9px; border-radius: 50%;
+    background: var(--marking); border: 2px solid var(--surface);
+  }
+  .timeline .when { font-family: var(--mono); color: var(--faded); font-size: 11px; }
+  .timeline .note { color: var(--faded); margin-top: 2px; }
+  .scrim {
+    position: fixed; inset: 0; background: rgba(0,0,0,.5);
+    opacity: 0; pointer-events: none; transition: opacity .22s; z-index: 1100;
+  }
+  .scrim.open { opacity: 1; pointer-events: auto; }
+
+  /* ── Map overlay control ──────────────────────────────────────────── */
+  .map-ctl {
+    position: absolute; z-index: 500; top: 12px; right: 12px;
+    display: flex; gap: 6px;
+  }
+  .map-ctl button {
+    background: rgba(24,30,37,.94); color: var(--faded);
+    border: 1px solid var(--line); border-radius: 5px;
+    padding: 6px 10px; font-size: 11px; cursor: pointer;
+    font-family: var(--mono);
+  }
+  .map-ctl button[aria-pressed="true"] { color: var(--marking); border-color: var(--marking); }
+  main { position: relative; }
+
   @media (max-width: 900px) {
     main { flex-direction: column; }
     #map { min-height: 320px; flex: none; height: 42vh; }
@@ -183,59 +303,123 @@
 
 <main>
   <div id="map" role="application" aria-label="Defect map"></div>
+  <div class="map-ctl">
+    <button id="btn-heat" aria-pressed="false" title="Overlay the predictive risk heatmap">RISK HEATMAP</button>
+    <button id="btn-fit" title="Zoom to fit every defect">FIT</button>
+  </div>
+
   <aside>
     <div class="queue-head">
-      <h2>Work queue</h2>
-      <select id="f-status" aria-label="Filter by status">
-        <option value="">All statuses</option>
-      </select>
-      <select id="f-dept" aria-label="Filter by department">
-        <option value="">All departments</option>
-      </select>
+      <div class="tabs" role="tablist">
+        <button class="tab" role="tab" id="tab-queue"   aria-selected="true"  aria-controls="panel-queue">Work queue<span class="count" id="c-queue">0</span></button>
+        <button class="tab" role="tab" id="tab-predict" aria-selected="false" aria-controls="panel-predict">Predictive<span class="count" id="c-predict">0</span></button>
+        <button class="tab" role="tab" id="tab-crews"   aria-selected="false" aria-controls="panel-crews">Crews<span class="count" id="c-crews">0</span></button>
+      </div>
     </div>
-    <div id="list"></div>
+
+    <div class="ctl-row" id="ctl-queue">
+      <input id="q" type="search" placeholder="search id, type, engineer…" aria-label="Search tickets" />
+      <select id="f-status" aria-label="Filter by status"><option value="">All statuses</option></select>
+      <select id="f-dept" aria-label="Filter by department"><option value="">All departments</option></select>
+      <select id="f-sort" aria-label="Sort tickets">
+        <option value="priority">Priority</option>
+        <option value="severity">Severity</option>
+        <option value="sla">SLA soonest</option>
+        <option value="cost">Cost</option>
+      </select>
+      <button class="ghost-btn" id="btn-reset" title="Undo local status changes">Reset</button>
+    </div>
+
+    <div class="panel active" id="panel-queue" role="tabpanel" aria-labelledby="tab-queue">
+      <div id="list"></div>
+    </div>
+    <div class="panel" id="panel-predict" role="tabpanel" aria-labelledby="tab-predict"></div>
+    <div class="panel" id="panel-crews" role="tabpanel" aria-labelledby="tab-crews"></div>
+
     <div class="src-note" id="src-note">connecting…</div>
   </aside>
 </main>
+
+<div class="scrim" id="scrim"></div>
+<div class="drawer" id="drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-id" hidden>
+  <div class="drawer-head">
+    <span class="t-id" id="drawer-id"></span>
+    <span class="chip" id="drawer-chip"></span>
+    <button class="close" id="drawer-close" aria-label="Close ticket detail">&times;</button>
+  </div>
+  <div class="drawer-body" id="drawer-body"></div>
+</div>
 
 <script src="demo_data.js" onerror="void 0"></script>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 const STATUSES = ["OPEN","ASSIGNED","IN_PROGRESS","FIXED","VERIFIED","REOPENED"];
 const SEV_COLORS = {4:"#FF4A3A",3:"#FF9330",2:"#F5C84C",1:"#6FA8DC"};
-const state = { tickets: [], stats: {}, live: false, activeId: null };
+const SEV_NAME   = {4:"Critical",3:"High",2:"Medium",1:"Low"};
+const STORE_KEY  = "chakranetra.overrides.v1";
 
-/* ── Data: live API first, embedded demo data as fallback ───────────── */
+const state = {
+  tickets: [], stats: {}, alerts: [], segments: [], crews: [], heatmap: [],
+  live: false, activeId: null, view: "queue", overrides: {},
+};
+
+const $  = (id) => document.getElementById(id);
+const esc = (v) => String(v ?? "").replace(/[&<>"']/g, c =>
+  ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]));
+const inr = (n) => (Number(n) || 0).toLocaleString("en-IN");
+
+/* ── Local persistence: status changes survive a reload in demo mode ── */
+function loadOverrides() {
+  try { state.overrides = JSON.parse(localStorage.getItem(STORE_KEY)) || {}; }
+  catch { state.overrides = {}; }
+}
+function saveOverrides() {
+  try { localStorage.setItem(STORE_KEY, JSON.stringify(state.overrides)); } catch {}
+}
+function applyOverrides() {
+  for (const t of state.tickets) {
+    const o = state.overrides[t.id];
+    if (o) { t.status = o.status; t.status_history = o.history || t.status_history; }
+  }
+}
+
+/* ── Data: live API first, embedded engine output as fallback ───────── */
 async function loadData() {
   try {
-    const [t, s] = await Promise.all([
+    const [t, s, a, g, c] = await Promise.all([
       fetch("/api/tickets").then(r => { if (!r.ok) throw 0; return r.json(); }),
-      fetch("/api/stats").then(r => r.json()),
+      fetch("/api/stats").then(r => { if (!r.ok) throw 0; return r.json(); }),
+      fetch("/api/predictive/alerts").then(r => r.ok ? r.json() : []).catch(() => []),
+      fetch("/api/predictive/segments").then(r => r.ok ? r.json() : []).catch(() => []),
+      fetch("/api/predictive/crews").then(r => r.ok ? r.json() : []).catch(() => []),
     ]);
-    state.tickets = t; state.stats = s; state.live = true;
+    state.tickets = t; state.stats = s; state.alerts = a;
+    state.segments = g; state.crews = c; state.live = true;
+    state.heatmap = await fetch("/api/predictive/heatmap").then(r => r.ok ? r.json() : []).catch(() => []);
   } catch {
-    if (window.ROADLENS_DEMO) {
-      state.tickets = window.ROADLENS_DEMO.tickets;
-      state.stats = window.ROADLENS_DEMO.stats;
+    const d = window.CHAKRANETRA_DEMO;
+    if (d) {
+      state.tickets = d.tickets || []; state.stats = d.stats || {};
+      state.alerts = d.alerts || [];   state.segments = d.segments || [];
+      state.crews = d.crews || [];     state.heatmap = d.heatmap || [];
+      loadOverrides(); applyOverrides(); recomputeLocalStats(false);
     }
   }
-  document.getElementById("src-note").textContent = state.live
+  $("src-note").textContent = state.live
     ? "live · connected to Chakranetra API"
-    : "demo data · run `uvicorn server.app:app` for live mode";
+    : "engine output · every figure computed by roadlens/, replayed offline";
 }
 
 /* ── Map ────────────────────────────────────────────────────────────── */
-let map, markers = {};
+let map, markers = {}, heatLayer = null, heatOn = false;
 function initMap() {
   map = L.map("map", { zoomControl: true });
-  // CARTO's dark basemap CDN now serves an "API KEY REQUIRED" watermark on
-  // unkeyed requests, which silently broke the map (tiles still return 200).
-  // OpenStreetMap's standard tiles need no key; the CSS filter on
-  // .leaflet-tile-pane below inverts them to match the asphalt theme.
   L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
     attribution: "&copy; OpenStreetMap contributors", maxZoom: 19,
   }).addTo(map);
+  map.setView([12.9516, 77.6995], 15);
 }
+
 function drawMarkers() {
   Object.values(markers).forEach(m => m.remove());
   markers = {};
@@ -255,89 +439,296 @@ function drawMarkers() {
     markers[t.id] = L.marker([t.lat, t.lon], { icon })
       .addTo(map)
       .bindPopup(
-        `<b style="font-family:monospace">${t.id}</b><br>` +
-        `${t.severity_label} ${t.defect_type} · seen ${t.sightings}× ` +
-        `· est ₹${(t.est_cost_inr ?? 0).toLocaleString("en-IN")}<br>${t.department}`
+        `<b style="font-family:monospace">${esc(t.id)}</b><br>` +
+        `${esc(t.severity_label)} ${esc(t.defect_type)} · seen ${t.sightings}x ` +
+        `· est INR ${inr(t.est_cost_inr)}<br>${esc(t.department)}`
       )
-      .on("click", () => selectTicket(t.id, false));
+      .on("click", () => { selectTicket(t.id, false); openDrawer(t.id); });
   }
-  if (pts.length) map.fitBounds(pts, { padding: [40, 40] });
-  else map.setView([12.9716, 77.5946], 12);
+  if (pts.length) map.fitBounds(pts, { padding: [32, 32], maxZoom: 17 });
+}
+
+function buildHeatLayer() {
+  if (heatLayer) { heatLayer.remove(); heatLayer = null; }
+  if (!state.heatmap.length) return;
+  heatLayer = L.layerGroup(state.heatmap.map(cell => {
+    const intensity = Math.max(cell.intensity || 0, 0.15);
+    return L.circle([cell.lat, cell.lon], {
+      radius: 260,
+      color: "#F7B500", weight: 1, opacity: 0.55,
+      fillColor: "#F7B500", fillOpacity: 0.10 + intensity * 0.35,
+    }).bindPopup(
+      `<b>Risk cell</b><br>${cell.defect_count} defect(s)` +
+      `<br>max severity L${cell.max_severity}` +
+      `<br>${cell.recurrence_count} recurrence(s)`
+    );
+  }));
+}
+
+function toggleHeat() {
+  heatOn = !heatOn;
+  $("btn-heat").setAttribute("aria-pressed", String(heatOn));
+  if (!heatLayer) buildHeatLayer();
+  if (!heatLayer) return;
+  heatOn ? heatLayer.addTo(map) : heatLayer.remove();
 }
 
 /* ── Stats strip ────────────────────────────────────────────────────── */
 function drawStats() {
   const s = state.stats;
-  const cost = (s.est_backlog_cost_inr ?? 0).toLocaleString("en-IN");
-  document.getElementById("stats").innerHTML = `
+  $("stats").innerHTML = `
     <div class="stat"><b>${s.open ?? 0}</b><span>Open tickets</span></div>
     <div class="stat crit"><b>${s.critical_open ?? 0}</b><span>Critical open</span></div>
     <div class="stat due"><b>${s.overdue_sla ?? 0}</b><span>Past SLA</span></div>
-    <div class="stat cost"><b>₹${cost}</b><span>Backlog cost</span></div>
+    <div class="stat cost"><b>INR ${inr(s.est_backlog_cost_inr)}</b><span>Backlog cost</span></div>
     <div class="stat done"><b>${s.fixed_or_verified ?? 0}</b><span>Fixed</span></div>`;
 }
 
-/* ── Work queue ─────────────────────────────────────────────────────── */
+/* ── SLA helpers (live-ticking) ─────────────────────────────────────── */
 function slaText(t) {
   if (["FIXED","VERIFIED"].includes(t.status)) return { txt: "closed", overdue: false };
   const ms = new Date(t.sla_due_at) - Date.now();
-  const h = Math.abs(ms) / 36e5;
-  const span = h >= 48 ? Math.round(h/24) + "d" : Math.round(h) + "h";
+  const abs = Math.abs(ms);
+  const h = abs / 36e5;
+  let span;
+  if (h >= 48)     span = Math.round(h / 24) + "d";
+  else if (h >= 1) span = Math.floor(h) + "h " + Math.floor((abs % 36e5) / 6e4) + "m";
+  else             span = Math.floor(abs / 6e4) + "m " + Math.floor((abs % 6e4) / 1000) + "s";
   return ms < 0 ? { txt: "SLA +" + span + " over", overdue: true }
                 : { txt: "SLA in " + span, overdue: false };
 }
+function tickSla() {
+  document.querySelectorAll("[data-due]").forEach(el => {
+    const t = state.tickets.find(x => x.id === el.dataset.due);
+    if (!t) return;
+    const s = slaText(t);
+    el.textContent = s.txt;
+    el.classList.toggle("overdue", s.overdue);
+  });
+}
+
+/* ── Work queue ─────────────────────────────────────────────────────── */
+function visibleTickets() {
+  const fs = $("f-status").value, fd = $("f-dept").value;
+  const q = ($("q").value || "").trim().toLowerCase();
+  const sort = $("f-sort").value;
+
+  let rows = state.tickets.filter(t =>
+    (!fs || t.status === fs) &&
+    (!fd || t.department === fd) &&
+    (!q || [t.id, t.defect_type, t.assigned_to, t.department, t.severity_label]
+      .some(v => String(v ?? "").toLowerCase().includes(q))));
+
+  const cmp = {
+    priority: (a, b) => b.priority_score - a.priority_score,
+    severity: (a, b) => b.severity_level - a.severity_level || b.priority_score - a.priority_score,
+    cost:     (a, b) => b.est_cost_inr - a.est_cost_inr,
+    sla:      (a, b) => new Date(a.sla_due_at) - new Date(b.sla_due_at),
+  }[sort] || ((a, b) => b.priority_score - a.priority_score);
+
+  return rows.slice().sort(cmp);
+}
 
 function drawList() {
-  const fs = document.getElementById("f-status").value;
-  const fd = document.getElementById("f-dept").value;
-  const rows = state.tickets.filter(t =>
-    (!fs || t.status === fs) && (!fd || t.department === fd));
+  const rows = visibleTickets();
+  const list = $("list");
+  $("c-queue").textContent = rows.length;
 
-  const list = document.getElementById("list");
   if (!rows.length) {
     list.innerHTML = `<div class="empty">No tickets match these filters.<br>
       Clear a filter, or run <code>python run_demo.py</code> to scan the sample trip.</div>`;
     return;
   }
-  list.innerHTML = rows.map(t => {
+
+  list.innerHTML = distributionBar(rows) + rows.map(t => {
     const sla = slaText(t);
     const done = ["FIXED","VERIFIED"].includes(t.status);
     return `
-    <div class="ticket ${t.id===state.activeId?"active":""}" data-sev="${t.severity_level}"
-         data-id="${t.id}" tabindex="0" role="button"
-         aria-label="Ticket ${t.id}, ${t.severity_label}">
+    <div class="ticket ${t.id === state.activeId ? "active" : ""}" data-sev="${t.severity_level}"
+         data-id="${esc(t.id)}" tabindex="0" role="button"
+         aria-label="Ticket ${esc(t.id)}, ${esc(t.severity_label)}">
       <div class="t-top">
-        <span class="t-id">${t.id}</span>
-        <span class="chip s${t.severity_level}">${t.severity_label}</span>
-        <span class="t-status ${done?"done":""}">${t.status.replace("_"," ")}</span>
+        <span class="t-id">${esc(t.id)}</span>
+        <span class="chip s${t.severity_level}">${esc(t.severity_label)}</span>
+        <span class="t-status ${done ? "done" : ""}">${esc(t.status).replace("_"," ")}</span>
       </div>
       <div class="t-mid">
-        <span><b>${t.defect_type}</b> · seen <b>${t.sightings}×</b></span>
-        <span>est <b>₹${(t.est_cost_inr ?? 0).toLocaleString("en-IN")}</b></span>
-        <span>${t.department}</span>
-        ${t.assigned_to ? `<span>→ <b>${t.assigned_to}</b></span>` : ""}
+        <span><b>${esc(t.defect_type)}</b> · seen <b>${t.sightings}x</b></span>
+        <span>est <b>INR ${inr(t.est_cost_inr)}</b></span>
+        ${t.recurrence_count > 0 ? `<span style="color:var(--sev4)">recurred <b>${t.recurrence_count}x</b></span>` : ""}
+        ${t.assigned_to ? `<span>-> <b>${esc(t.assigned_to)}</b></span>` : ""}
       </div>
       <div class="t-bottom">
         <div class="prio-track" title="Priority ${t.priority_score}/100">
           <div class="prio-fill" style="width:${t.priority_score}%"></div>
         </div>
-        <span class="sla ${sla.overdue?"overdue":""}">${sla.txt}</span>
-        <select data-move="${t.id}" aria-label="Move ${t.id} to status">
-          ${STATUSES.map(s => `<option ${s===t.status?"selected":""}>${s}</option>`).join("")}
+        <span class="sla ${sla.overdue ? "overdue" : ""}" data-due="${esc(t.id)}">${sla.txt}</span>
+        <select data-move="${esc(t.id)}" aria-label="Move ${esc(t.id)} to status">
+          ${STATUSES.map(s => `<option ${s === t.status ? "selected" : ""}>${s}</option>`).join("")}
         </select>
       </div>
     </div>`;
   }).join("");
 }
 
+function distributionBar(rows) {
+  const total = rows.length || 1;
+  const counts = [4,3,2,1].map(l => ({ l, n: rows.filter(t => t.severity_level === l).length }));
+  const bars = counts.filter(c => c.n)
+    .map(c => `<span style="width:${(c.n/total*100).toFixed(1)}%;background:${SEV_COLORS[c.l]}"></span>`).join("");
+  const key = counts.filter(c => c.n)
+    .map(c => `<span><i style="background:${SEV_COLORS[c.l]}"></i>${SEV_NAME[c.l]} ${c.n}</span>`).join("");
+  return `<div class="dist">${bars}</div><div class="dist-key">${key}</div>
+          <div class="section-label">${rows.length} ticket(s) in view</div>`;
+}
+
+/* ── Predictive panel ───────────────────────────────────────────────── */
+function drawPredictive() {
+  const el = $("panel-predict");
+  $("c-predict").textContent = state.alerts.length + state.segments.length;
+
+  const alerts = state.alerts.map(a => `
+    <div class="card ${esc(a.severity)}">
+      <h3>${a.type === "repair_quality_issue" ? "Repair quality issue" : "Preventive maintenance"}
+        <span class="chip ${a.severity === "critical" ? "s4" : a.severity === "high" ? "s3" : "s2"}">${esc(a.severity)}</span>
+      </h3>
+      <p>${esc(a.recommendation)}</p>
+      <div class="kv">
+        ${a.original_ticket_id ? `<span>ticket <b>${esc(a.original_ticket_id)}</b></span>` : ""}
+        ${a.recurrence_count != null ? `<span>recurrences <b>${a.recurrence_count}</b></span>` : ""}
+        ${a.repair_quality_score != null ? `<span>quality <b>${a.repair_quality_score}</b></span>` : ""}
+        ${a.assigned_crew ? `<span>crew <b>${esc(a.assigned_crew)}</b></span>` : ""}
+        ${a.estimated_preventive_cost != null ? `<span>preventive est <b>INR ${inr(a.estimated_preventive_cost)}</b></span>` : ""}
+      </div>
+    </div>`).join("");
+
+  const segs = state.segments.map(g => `
+    <div class="card ${esc(g.risk_label)}">
+      <h3>Risk segment
+        <span class="chip ${g.risk_label === "critical" ? "s4" : g.risk_label === "high" ? "s3" : g.risk_label === "medium" ? "s2" : "s1"}">${esc(g.risk_label)}</span>
+      </h3>
+      <p>${esc(g.recommended_action)}</p>
+      <div class="meter"><i class="${g.risk_score >= 0.7 ? "bad" : ""}" style="width:${Math.round(g.risk_score*100)}%"></i></div>
+      <div class="kv">
+        <span>risk <b>${g.risk_score}</b></span>
+        <span>defects <b>${g.total_defects_ever}</b></span>
+        <span>last 30d <b>${g.defects_last_30_days}</b></span>
+        <span>recurrences <b>${g.recurrence_count}</b></span>
+        <span class="seg-jump" data-lat="${g.center_lat}" data-lon="${g.center_lon}"
+              style="cursor:pointer;color:var(--marking)">show on map</span>
+      </div>
+    </div>`).join("");
+
+  el.innerHTML =
+    `<div class="section-label">Alerts (${state.alerts.length})</div>` +
+    (alerts || `<div class="empty" style="padding:24px">No alerts. Every monitored repair is holding.</div>`) +
+    `<div class="section-label">Risk segments (${state.segments.length})</div>` +
+    (segs || `<div class="empty" style="padding:24px">No segments computed yet.</div>`);
+}
+
+/* ── Crew panel ─────────────────────────────────────────────────────── */
+function drawCrews() {
+  const el = $("panel-crews");
+  $("c-crews").textContent = state.crews.length;
+  if (!state.crews.length) {
+    el.innerHTML = `<div class="empty">No crews under monitoring yet.<br>
+      A crew appears here once one of its repairs is marked FIXED.</div>`;
+    return;
+  }
+  el.innerHTML = `<div class="section-label">Repair quality by crew</div>` + state.crews.map(c => {
+    const pct = Math.round((c.avg_quality_score ?? 0) * 100);
+    const cls = pct >= 90 ? "good" : pct < 50 ? "bad" : "";
+    return `
+    <div class="card ${pct >= 90 ? "low" : pct >= 70 ? "medium" : pct >= 50 ? "high" : "critical"}">
+      <h3>${esc(c.crew)}</h3>
+      <div class="meter"><i class="${cls}" style="width:${pct}%"></i></div>
+      <div class="kv">
+        <span>quality <b>${c.avg_quality_score}</b></span>
+        <span>repairs monitored <b>${c.tickets_monitored}</b></span>
+        <span>avg recurrences <b>${c.avg_recurrences}</b></span>
+        <span>rating <b>${esc(String(c.performance_label).replace(/_/g," "))}</b></span>
+      </div>
+    </div>`;
+  }).join("");
+}
+
+/* ── Ticket detail drawer ───────────────────────────────────────────── */
+function historyOf(t) {
+  let h = t.status_history;
+  if (typeof h === "string") { try { h = JSON.parse(h); } catch { h = []; } }
+  return Array.isArray(h) ? h : [];
+}
+
+function openDrawer(id) {
+  const t = state.tickets.find(x => x.id === id);
+  if (!t) return;
+  $("drawer-id").textContent = t.id;
+  const chip = $("drawer-chip");
+  chip.className = "chip s" + t.severity_level;
+  chip.textContent = t.severity_label;
+
+  const facts = [
+    ["Status", String(t.status).replace("_"," ")],
+    ["Defect", t.defect_type],
+    ["Department", t.department],
+    ["Assigned", t.assigned_to || "unassigned"],
+    ["Priority", `${t.priority_score}/100`],
+    ["Estimated cost", "INR " + inr(t.est_cost_inr)],
+    ["Frame area", ((t.area_ratio ?? 0) * 100).toFixed(2) + "% of frame"],
+    ["Model confidence", ((t.confidence ?? 0) * 100).toFixed(0) + "%"],
+    ["Sightings merged", t.sightings],
+    ["Recurrences", t.recurrence_count ?? 0],
+    ["Repair quality", t.repair_quality_score ?? 1],
+    ["Location", `${Number(t.lat).toFixed(6)}, ${Number(t.lon).toFixed(6)}`],
+    ["SLA due", new Date(t.sla_due_at).toLocaleString()],
+  ].map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("");
+
+  const tl = historyOf(t).map(h => `
+    <li>
+      <div><b>${esc(String(h.status).replace("_"," "))}</b></div>
+      <div class="when">${esc(new Date(h.at).toLocaleString())}</div>
+      ${h.note ? `<div class="note">${esc(h.note)}</div>` : ""}
+    </li>`).join("");
+
+  $("drawer-body").innerHTML =
+    `<dl class="facts">${facts}</dl>
+     <div class="section-label">Lifecycle</div>
+     <ul class="timeline">${tl || "<li>No history recorded.</li>"}</ul>`;
+
+  history.replaceState(null, "", "#t/" + encodeURIComponent(t.id));
+  $("drawer").hidden = false;
+  requestAnimationFrame(() => {
+    $("drawer").classList.add("open");
+    $("scrim").classList.add("open");
+  });
+}
+function closeDrawer() {
+  if (location.hash.startsWith("#t/")) history.replaceState(null, "", "#" + state.view);
+  $("drawer").classList.remove("open");
+  $("scrim").classList.remove("open");
+  setTimeout(() => { $("drawer").hidden = true; }, 220);
+}
+
+/* ── Filters / tabs ─────────────────────────────────────────────────── */
 function drawFilters() {
   const depts = [...new Set(state.tickets.map(t => t.department))];
-  const fd = document.getElementById("f-dept");
-  fd.innerHTML = `<option value="">All departments</option>` +
-    depts.map(d => `<option>${d}</option>`).join("");
-  const fs = document.getElementById("f-status");
-  fs.innerHTML = `<option value="">All statuses</option>` +
+  $("f-dept").innerHTML = `<option value="">All departments</option>` +
+    depts.map(d => `<option>${esc(d)}</option>`).join("");
+  $("f-status").innerHTML = `<option value="">All statuses</option>` +
     STATUSES.map(s => `<option>${s}</option>`).join("");
+}
+
+function setView(view, push = true) {
+  if (!["queue","predict","crews"].includes(view)) view = "queue";
+  state.view = view;
+  for (const v of ["queue","predict","crews"]) {
+    $("tab-" + v).setAttribute("aria-selected", String(v === view));
+    $("panel-" + v).classList.toggle("active", v === view);
+  }
+  $("ctl-queue").style.display = view === "queue" ? "" : "none";
+  // Views are deep-linkable, so a colleague can be sent straight to the
+  // predictive board rather than "click the third tab".
+  if (push && location.hash.slice(1) !== view) history.replaceState(null, "", "#" + view);
 }
 
 function selectTicket(id, pan = true) {
@@ -345,76 +736,109 @@ function selectTicket(id, pan = true) {
   drawList();
   const t = state.tickets.find(x => x.id === id);
   if (t && pan && markers[id]) {
-    map.setView([t.lat, t.lon], Math.max(map.getZoom(), 16));
+    map.setView([t.lat, t.lon], Math.max(map.getZoom(), 17));
     markers[id].openPopup();
   }
-  const el = document.querySelector(`.ticket[data-id="${id}"]`);
+  const el = document.querySelector(`.ticket[data-id="${CSS.escape(id)}"]`);
   if (el) el.scrollIntoView({ block: "nearest" });
 }
 
-/* ── Status changes: hit the API when live, local-only in demo mode ── */
+/* ── Status changes: API when live, persisted locally in demo mode ─── */
 async function moveTicket(id, status) {
   if (state.live) {
     try {
-      const r = await fetch(`/api/tickets/${id}/status`, {
+      const r = await fetch(`/api/tickets/${encodeURIComponent(id)}/status`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status, note: "Updated from console" }),
       });
       const body = await r.json();
-      // Without this check an error payload ({detail: "..."}) was written
-      // straight into state.tickets, and the next render blew up on
-      // undefined.est_cost_inr — the whole console went blank.
       if (!r.ok) throw new Error(body.detail || `HTTP ${r.status}`);
       const i = state.tickets.findIndex(t => t.id === id);
       if (i === -1) throw new Error("Ticket vanished from the local queue");
       state.tickets[i] = body;
     } catch (err) {
-      const note = document.getElementById("src-note");
-      if (note) note.textContent = `update failed: ${err.message}`;
+      $("src-note").textContent = `update failed: ${err.message}`;
       drawList();
       return;
     }
   } else {
     const t = state.tickets.find(t => t.id === id);
     if (!t) return;
+    const hist = historyOf(t);
+    hist.push({ status, at: new Date().toISOString(), note: "Updated from console" });
     t.status = status;
+    t.status_history = hist;
+    state.overrides[id] = { status, history: hist };
+    saveOverrides();
   }
-  drawList(); drawMarkers(); recomputeLocalStats();
+  recomputeLocalStats();
+  drawList(); drawMarkers();
 }
-function recomputeLocalStats() {
-  if (state.live) { fetch("/api/stats").then(r=>r.json()).then(s=>{state.stats=s;drawStats();}); return; }
+
+function recomputeLocalStats(redraw = true) {
+  if (state.live) {
+    fetch("/api/stats").then(r => r.json()).then(s => { state.stats = s; drawStats(); });
+    return;
+  }
   const open = state.tickets.filter(t => !["FIXED","VERIFIED"].includes(t.status));
   state.stats = {
     open: open.length,
     critical_open: open.filter(t => t.severity_level === 4).length,
     overdue_sla: open.filter(t => new Date(t.sla_due_at) < Date.now()).length,
-    est_backlog_cost_inr: open.reduce((a,t) => a + t.est_cost_inr, 0),
+    est_backlog_cost_inr: open.reduce((a, t) => a + (t.est_cost_inr || 0), 0),
     fixed_or_verified: state.tickets.length - open.length,
   };
-  drawStats();
+  if (redraw) drawStats();
 }
 
 /* ── Events ─────────────────────────────────────────────────────────── */
 document.addEventListener("click", e => {
+  if (e.target.closest("#tab-queue"))   return setView("queue");
+  if (e.target.closest("#tab-predict")) return setView("predict");
+  if (e.target.closest("#tab-crews"))   return setView("crews");
+  if (e.target.closest("#btn-heat"))    return toggleHeat();
+  if (e.target.closest("#btn-fit"))     return drawMarkers();
+  if (e.target.closest("#drawer-close") || e.target.closest("#scrim")) return closeDrawer();
+  if (e.target.closest("#btn-reset")) {
+    state.overrides = {}; saveOverrides(); location.reload(); return;
+  }
+  const jump = e.target.closest(".seg-jump");
+  if (jump) { map.setView([+jump.dataset.lat, +jump.dataset.lon], 16); return; }
+
   const card = e.target.closest(".ticket");
-  if (card && !e.target.matches("select")) selectTicket(card.dataset.id);
+  if (card && !e.target.matches("select")) {
+    selectTicket(card.dataset.id);
+    openDrawer(card.dataset.id);
+  }
 });
 document.addEventListener("keydown", e => {
+  if (e.key === "Escape") closeDrawer();
   if (e.key === "Enter") {
     const card = e.target.closest?.(".ticket");
-    if (card) selectTicket(card.dataset.id);
+    if (card) { selectTicket(card.dataset.id); openDrawer(card.dataset.id); }
   }
 });
 document.addEventListener("change", e => {
   if (e.target.dataset.move) moveTicket(e.target.dataset.move, e.target.value);
-  if (e.target.id === "f-status" || e.target.id === "f-dept") drawList();
+  if (["f-status","f-dept","f-sort"].includes(e.target.id)) drawList();
 });
+document.addEventListener("input", e => { if (e.target.id === "q") drawList(); });
 
 /* ── Boot ───────────────────────────────────────────────────────────── */
 (async function () {
   initMap();
   await loadData();
   drawFilters(); drawStats(); drawList(); drawMarkers();
+  drawPredictive(); drawCrews();
+  const h = location.hash.slice(1);
+  if (h.startsWith("t/")) { setView("queue", false); const id = decodeURIComponent(h.slice(2)); selectTicket(id); openDrawer(id); }
+  else setView(h || "queue");
+  buildHeatLayer();
+  setInterval(tickSla, 1000);
+  window.addEventListener("hashchange", () => {
+    const hh = location.hash.slice(1);
+    if (!hh.startsWith("t/")) setView(hh, false);
+  });
 })();
 </script>
 </body>

@@ -181,4 +181,4 @@ class TestDashboardRoutes:
     def test_dashboard_served(self, client):
         r = client.get("/")
         assert r.status_code == 200
-        assert "RoadLens" in r.text
+        assert "Chakranetra" in r.text
