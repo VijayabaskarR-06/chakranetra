@@ -38,8 +38,11 @@ dbdata/
 
 # ── ML model weights (downloaded from Hugging Face, cached) ─────────────
 *.pt
-*.onnx
 *.engine
+# The browser build needs this one checked in (45 MB) — it is the whole
+# reason the site can run inference with no server.
+*.onnx
+!dashboard/model/*.onnx
 
 # ── Testing / coverage ──────────────────────────────────────────────────
 .pytest_cache/

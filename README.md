@@ -4,6 +4,11 @@
 
 ### ▶ [Open the live operations console](https://vijayabaskarr-06.github.io/chakranetra/)
 
+**The model runs in your browser.** Drop a road photo into the
+[Scan tab](https://vijayabaskarr-06.github.io/chakranetra/#scan) and YOLOv8-seg
+executes on your own machine via ONNX Runtime WebAssembly — no server, no upload,
+no API key. The photo never leaves your device.
+
 The console runs on real output from this repository — 7 tickets produced by scanning the
 sample trip in `data/samples/`. Pan the map, filter the work queue, move a ticket through
 the civic workflow. For live image scanning, run the API locally (see Quickstart below).
@@ -15,6 +20,30 @@ coloured by severity — red L4 Critical, amber L3 High, green repaired. Search,
 sort the queue; SLA countdowns tick live; click any ticket for its full lifecycle. Status
 changes persist across reloads, and every view is deep-linkable
 (`#predict`, `#crews`, `#t/RL-POT-2026-0003`).*
+
+### Detection in the browser, scored identically to the server
+
+![In-browser YOLOv8 segmentation](docs/screenshots/browser-scan.png)
+
+*A photo scanned client-side: segmentation masks, confidences, and the tickets
+that come out of them. This is the same 45 MB YOLOv8s-seg network the Python
+pipeline uses, exported to ONNX and run with onnxruntime-web.*
+
+Duplicating a scoring engine into JavaScript is how demos start lying, so the
+port is pinned down by tests rather than trust:
+
+| Check | What it proves |
+|---|---|
+| `tools/check_onnx_parity.py` | The ONNX graph reproduces **ultralytics** — `area_ratio` delta `0.000000` across the sample set |
+| `tests/test_js_inference_parity.py` | `dashboard/scan.js` reproduces the Python post-processing — boxes, confidences and `area_ratio` to `1e-9` |
+| `tests/test_js_parity.py` | The JS scoring matches `roadlens.severity.assess` on 2 000 random inputs plus every band boundary |
+| `tests/test_js_parity.py` | `dashboard/rules.generated.js` is regenerated from `config.yaml`, and CI fails if it goes stale |
+
+One subtlety that mattered: ultralytics crops and thresholds mask **logits**
+(`> 0`), not sigmoid probabilities (`> 0.5`). Because sigmoid is non-linear,
+applying it before upsampling shifts mask areas by up to `0.0034` of the frame —
+enough to move a defect across the `0.060` L4-Critical boundary and file the
+wrong ticket. The parity harness caught it.
 
 ### Predictive board — the accountability loop closing
 

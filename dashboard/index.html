@@ -162,12 +162,12 @@
   @media (prefers-reduced-motion: reduce) { .pin.s4 { animation: none; } }
 
   /* ── Tabs ─────────────────────────────────────────────────────────── */
-  .tabs { display: flex; gap: 4px; width: 100%; }
+  .tabs { display: flex; gap: 2px; width: 100%; flex-wrap: wrap; }
   .tab {
     background: none; border: 0; border-bottom: 2px solid transparent;
-    color: var(--faded); padding: 6px 12px 8px; cursor: pointer;
-    font-family: "Saira Condensed", sans-serif; font-size: 15px;
-    letter-spacing: .07em; text-transform: uppercase;
+    color: var(--faded); padding: 6px 9px 8px; cursor: pointer;
+    font-family: "Saira Condensed", sans-serif; font-size: 14px;
+    letter-spacing: .05em; text-transform: uppercase; white-space: nowrap;
   }
   .tab:hover { color: var(--chalk); }
   .tab[aria-selected="true"] { color: var(--marking); border-bottom-color: var(--marking); }
@@ -267,6 +267,34 @@
   }
   .scrim.open { opacity: 1; pointer-events: auto; }
 
+  /* ── Scan panel ───────────────────────────────────────────────────── */
+  .scan-intro { font-size: 12.5px; color: var(--faded); line-height: 1.6; margin-bottom: 12px; }
+  .scan-intro b { color: var(--chalk); font-weight: 500; }
+  .scan-drop {
+    border: 1px dashed var(--line); border-radius: 8px; padding: 18px 14px;
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    justify-content: center; margin-bottom: 10px; transition: border-color .15s;
+  }
+  .scan-drop.hot { border-color: var(--marking); background: rgba(247,181,0,.05); }
+  .scan-or { color: var(--faded); font-size: 12px; }
+  .scan-drop select {
+    background: var(--asphalt); color: var(--chalk); border: 1px solid var(--line);
+    border-radius: 5px; padding: 5px 8px; font-size: 12px;
+  }
+  .scan-lbl { font-family: var(--mono); font-size: 11px; color: var(--faded); }
+  .scan-lbl input {
+    background: var(--asphalt); color: var(--chalk); border: 1px solid var(--line);
+    border-radius: 5px; padding: 5px 7px; font-size: 12px; width: 108px;
+    font-family: var(--mono); margin-left: 4px;
+  }
+  .scan-status { font-family: var(--mono); font-size: 11.5px; color: var(--faded); min-height: 18px; }
+  .scan-status.err { color: var(--sev4); }
+  .scan-bar { height: 4px; background: var(--asphalt); border-radius: 2px; overflow: hidden; margin-top: 6px; }
+  .scan-bar i { display: block; height: 100%; background: var(--marking); width: 0; transition: width .15s; }
+  #scan-out canvas { width: 100%; border-radius: 7px; margin: 12px 0 6px; display: block; }
+  .scan-sum { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--faded); margin-bottom: 10px; }
+  .scan-sum b { color: var(--chalk); }
+
   /* ── Map overlay control ──────────────────────────────────────────── */
   .map-ctl {
     position: absolute; z-index: 500; top: 12px; right: 12px;
@@ -279,11 +307,12 @@
     font-family: var(--mono);
   }
   .map-ctl button[aria-pressed="true"] { color: var(--marking); border-color: var(--marking); }
-  main { position: relative; }
+  .map-wrap { flex: 1.35; min-width: 0; position: relative; display: flex; }
+  .map-wrap #map { flex: 1; min-width: 0; }
 
   @media (max-width: 900px) {
     main { flex-direction: column; }
-    #map { min-height: 320px; flex: none; height: 42vh; }
+    .map-wrap { min-height: 320px; flex: none; height: 42vh; }
     aside { max-width: none; border-left: 0; border-top: 1px solid var(--line); }
   }
 </style>
@@ -302,10 +331,12 @@
 </header>
 
 <main>
+  <div class="map-wrap">
   <div id="map" role="application" aria-label="Defect map"></div>
   <div class="map-ctl">
     <button id="btn-heat" aria-pressed="false" title="Overlay the predictive risk heatmap">RISK HEATMAP</button>
     <button id="btn-fit" title="Zoom to fit every defect">FIT</button>
+  </div>
   </div>
 
   <aside>
@@ -314,6 +345,7 @@
         <button class="tab" role="tab" id="tab-queue"   aria-selected="true"  aria-controls="panel-queue">Work queue<span class="count" id="c-queue">0</span></button>
         <button class="tab" role="tab" id="tab-predict" aria-selected="false" aria-controls="panel-predict">Predictive<span class="count" id="c-predict">0</span></button>
         <button class="tab" role="tab" id="tab-crews"   aria-selected="false" aria-controls="panel-crews">Crews<span class="count" id="c-crews">0</span></button>
+        <button class="tab" role="tab" id="tab-scan"    aria-selected="false" aria-controls="panel-scan">Scan</button>
       </div>
     </div>
 
@@ -336,6 +368,33 @@
     <div class="panel" id="panel-predict" role="tabpanel" aria-labelledby="tab-predict"></div>
     <div class="panel" id="panel-crews" role="tabpanel" aria-labelledby="tab-crews"></div>
 
+    <div class="panel" id="panel-scan" role="tabpanel" aria-labelledby="tab-scan">
+      <div class="section-label">Scan a road photo</div>
+      <p class="scan-intro">
+        The pothole segmentation model runs <b>in this browser</b> — the photo
+        never leaves your device. Detection, deduplication and scoring use the
+        same rules as the Python engine, verified equal by the test suite.
+      </p>
+
+      <div class="scan-drop" id="scan-drop">
+        <input type="file" id="scan-file" accept="image/*" hidden />
+        <button class="ghost-btn" id="scan-pick">Choose a photo</button>
+        <span class="scan-or">or</span>
+        <select id="scan-sample" aria-label="Use a sample photo">
+          <option value="">use a sample…</option>
+        </select>
+      </div>
+
+      <div class="ctl-row" style="padding-left:0;padding-right:0">
+        <label class="scan-lbl">lat <input id="scan-lat" type="number" step="0.000001" value="12.951600" /></label>
+        <label class="scan-lbl">lon <input id="scan-lon" type="number" step="0.000001" value="77.699500" /></label>
+        <button class="ghost-btn" id="scan-run">Scan</button>
+      </div>
+
+      <div id="scan-status" class="scan-status"></div>
+      <div id="scan-out"></div>
+    </div>
+
     <div class="src-note" id="src-note">connecting…</div>
   </aside>
 </main>
@@ -352,7 +411,11 @@
 
 <script src="demo_data.js" onerror="void 0"></script>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script>
+<script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.19.2/dist/ort.min.js"></script>
+<script type="module">
+import { assess, haversineM, RULES } from "./rules.generated.js";
+import { detect, loadModel, renderOverlay, modelBytes } from "./scan.js";
+
 const STATUSES = ["OPEN","ASSIGNED","IN_PROGRESS","FIXED","VERIFIED","REOPENED"];
 const SEV_COLORS = {4:"#FF4A3A",3:"#FF9330",2:"#F5C84C",1:"#6FA8DC"};
 const SEV_NAME   = {4:"Critical",3:"High",2:"Medium",1:"Low"};
@@ -719,9 +782,9 @@ function drawFilters() {
 }
 
 function setView(view, push = true) {
-  if (!["queue","predict","crews"].includes(view)) view = "queue";
+  if (!["queue","predict","crews","scan"].includes(view)) view = "queue";
   state.view = view;
-  for (const v of ["queue","predict","crews"]) {
+  for (const v of ["queue","predict","crews","scan"]) {
     $("tab-" + v).setAttribute("aria-selected", String(v === view));
     $("panel-" + v).classList.toggle("active", v === view);
   }
@@ -791,11 +854,199 @@ function recomputeLocalStats(redraw = true) {
   if (redraw) drawStats();
 }
 
+/* ── Scan: YOLOv8-seg in the browser ────────────────────────────────── */
+const SAMPLES = [
+  "img_0023_jpg.rf.45784ae212116117aa32d18c8b77aa4a.jpg",
+  "img_0053_jpg.rf.376bece2d8a0653ee55a564c6628436c.jpg",
+  "img_0065_jpg.rf.cc124ebfef589fb678209d781bca6d5a.jpg",
+  "img_0115_jpg.rf.0e2a142fc9ab9da392c41c9a3eefe785.jpg",
+  "img_0118_jpg.rf.a1855b77c61edf26542265e4c1f3a20f.jpg",
+];
+
+function setStatus(msg, isErr = false, pct = null) {
+  const el = $("scan-status");
+  el.classList.toggle("err", isErr);
+  el.innerHTML = esc(msg) + (pct === null ? "" :
+    `<div class="scan-bar"><i style="width:${Math.round(pct * 100)}%"></i></div>`);
+}
+
+function nextTicketId(defectType) {
+  const prefix = `RL-${defectType.slice(0, 3).toUpperCase()}-${new Date().getFullYear()}`;
+  let high = 0;
+  for (const t of state.tickets) {
+    if (!t.id.startsWith(prefix + "-")) continue;
+    const n = parseInt(t.id.split("-").pop(), 10);
+    if (Number.isFinite(n)) high = Math.max(high, n);
+  }
+  return `${prefix}-${String(high + 1).padStart(4, "0")}`;
+}
+
+/** Build/merge tickets exactly the way dedup.py + tickets.py do. */
+function fileTickets(detections, lat, lon, sourceName) {
+  const now = new Date();
+  const created = [], merged = [];
+
+  detections.forEach((d, i) => {
+    const type = "pothole";
+    // Same-frame rule: two defects in ONE photo are always distinct, so only
+    // consider tickets that did not come from this same scan.
+    const near = state.tickets.find(t =>
+      t.defect_type === type &&
+      t.lat != null && !created.includes(t) &&
+      haversineM(t.lat, t.lon, lat, lon) <= RULES.mergeRadiusMeters &&
+      !(t._lastSource === sourceName));
+
+    if (near) {
+      near.sightings += 1;
+      near.area_ratio = Math.max(near.area_ratio, d.area_ratio);
+      near.confidence = Math.max(near.confidence, d.confidence);
+      const a = assess(type, near.area_ratio, near.confidence, near.sightings);
+      Object.assign(near, {
+        severity_level: a.severity_level, severity_label: a.severity_label,
+        priority_score: a.priority_score, est_cost_inr: a.est_cost_inr,
+        department: a.department, _lastSource: sourceName,
+      });
+      merged.push(near);
+      return;
+    }
+
+    const a = assess(type, d.area_ratio, d.confidence, 1);
+    const due = new Date(now.getTime() + a.sla_hours * 3600e3);
+    const t = {
+      id: nextTicketId(type),
+      defect_type: type,
+      lat: +(lat + (i ? i * 0.000012 : 0)).toFixed(6),
+      lon: +(lon + (i ? i * 0.000012 : 0)).toFixed(6),
+      severity_level: a.severity_level, severity_label: a.severity_label,
+      priority_score: a.priority_score, est_cost_inr: a.est_cost_inr,
+      department: a.department, status: "OPEN", sightings: 1,
+      confidence: +d.confidence.toFixed(3), area_ratio: +d.area_ratio.toFixed(5),
+      sources: JSON.stringify([sourceName]),
+      created_at: now.toISOString(), sla_due_at: due.toISOString(),
+      assigned_to: null,
+      status_history: [{ status: "OPEN", at: now.toISOString(),
+                         note: "Auto-created by Chakranetra (in-browser scan)" }],
+      recurrence_count: 0, repair_quality_score: 1.0, last_recurrence_at: null,
+      _lastSource: sourceName,
+    };
+    state.tickets.push(t);
+    created.push(t);
+  });
+
+  return { created, merged };
+}
+
+async function runScan(blobOrUrl, label) {
+  const lat = parseFloat($("scan-lat").value);
+  const lon = parseFloat($("scan-lon").value);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon) ||
+      Math.abs(lat) > 90 || Math.abs(lon) > 180) {
+    setStatus("Enter a valid latitude (−90..90) and longitude (−180..180).", true);
+    return;
+  }
+
+  const out = $("scan-out");
+  out.innerHTML = "";
+  try {
+    setStatus(`Loading the model (${(modelBytes() / 1e6).toFixed(0)} MB, cached after the first run)…`, false, 0);
+    await loadModel(p => setStatus(
+      `Loading the model (${(modelBytes() / 1e6).toFixed(0)} MB, cached after the first run)…`, false, p));
+
+    setStatus("Decoding image…");
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.src = typeof blobOrUrl === "string" ? blobOrUrl : URL.createObjectURL(blobOrUrl);
+    await img.decode();
+
+    setStatus("Running segmentation…");
+    const t0 = performance.now();
+    const { detections, letterbox } = await detect(img, RULES.confidenceThreshold, 0.7);
+    const ms = Math.round(performance.now() - t0);
+
+    out.appendChild(renderOverlay(letterbox, detections));
+
+    if (!detections.length) {
+      setStatus(`No pothole above ${RULES.confidenceThreshold} confidence (${ms} ms).`);
+      out.insertAdjacentHTML("beforeend",
+        `<div class="empty" style="padding:18px">Nothing detected. The bundled
+         model finds potholes only — try a sample photo.</div>`);
+      return;
+    }
+
+    const { created, merged } = fileTickets(detections, lat, lon, label);
+    setStatus(`${detections.length} defect(s) in ${ms} ms — inference ran locally.`);
+
+    out.insertAdjacentHTML("beforeend", `<div class="scan-sum">
+        <span>detections <b>${detections.length}</b></span>
+        <span>new tickets <b>${created.length}</b></span>
+        <span>merged into existing <b>${merged.length}</b></span>
+      </div>`);
+    for (const t of [...created, ...merged]) {
+      out.insertAdjacentHTML("beforeend", `
+        <div class="card ${t.severity_level === 4 ? "critical" : t.severity_level === 3 ? "high" : "medium"}">
+          <h3>${esc(t.id)}
+            <span class="chip s${t.severity_level}">${esc(t.severity_label)}</span></h3>
+          <div class="kv">
+            <span>priority <b>${t.priority_score}/100</b></span>
+            <span>est <b>INR ${inr(t.est_cost_inr)}</b></span>
+            <span>frame area <b>${(t.area_ratio * 100).toFixed(2)}%</b></span>
+            <span>seen <b>${t.sightings}x</b></span>
+            <span>${esc(t.department)}</span>
+          </div>
+        </div>`);
+    }
+
+    for (const t of [...created, ...merged]) {
+      state.overrides[t.id] = { status: t.status, history: t.status_history, ticket: t };
+    }
+    saveOverrides();
+    recomputeLocalStats();
+    drawFilters(); drawList(); drawMarkers(); drawPredictive();
+    $("c-queue").textContent = visibleTickets().length;
+  } catch (err) {
+    console.error(err);
+    setStatus(`Scan failed: ${err.message}`, true);
+  }
+}
+
+function initScan() {
+  const sel = $("scan-sample");
+  sel.innerHTML = `<option value="">use a sample…</option>` +
+    SAMPLES.map(f => `<option value="${f}">${f.split("_jpg")[0]}</option>`).join("");
+
+  $("scan-pick").addEventListener("click", () => $("scan-file").click());
+  $("scan-file").addEventListener("change", e => {
+    if (e.target.files?.[0]) runScan(e.target.files[0], e.target.files[0].name);
+  });
+  sel.addEventListener("change", e => {
+    if (e.target.value) runScan(`samples/${e.target.value}`, e.target.value);
+  });
+  $("scan-run").addEventListener("click", () => {
+    const f = $("scan-file").files?.[0];
+    if (f) return runScan(f, f.name);
+    if (sel.value) return runScan(`samples/${sel.value}`, sel.value);
+    setStatus("Choose a photo or pick a sample first.", true);
+  });
+
+  const drop = $("scan-drop");
+  ["dragenter", "dragover"].forEach(ev => drop.addEventListener(ev, e => {
+    e.preventDefault(); drop.classList.add("hot");
+  }));
+  ["dragleave", "drop"].forEach(ev => drop.addEventListener(ev, e => {
+    e.preventDefault(); drop.classList.remove("hot");
+  }));
+  drop.addEventListener("drop", e => {
+    const f = e.dataTransfer?.files?.[0];
+    if (f) runScan(f, f.name);
+  });
+}
+
 /* ── Events ─────────────────────────────────────────────────────────── */
 document.addEventListener("click", e => {
   if (e.target.closest("#tab-queue"))   return setView("queue");
   if (e.target.closest("#tab-predict")) return setView("predict");
   if (e.target.closest("#tab-crews"))   return setView("crews");
+  if (e.target.closest("#tab-scan"))    return setView("scan");
   if (e.target.closest("#btn-heat"))    return toggleHeat();
   if (e.target.closest("#btn-fit"))     return drawMarkers();
   if (e.target.closest("#drawer-close") || e.target.closest("#scrim")) return closeDrawer();
@@ -834,6 +1085,17 @@ document.addEventListener("input", e => { if (e.target.id === "q") drawList(); }
   if (h.startsWith("t/")) { setView("queue", false); const id = decodeURIComponent(h.slice(2)); selectTicket(id); openDrawer(id); }
   else setView(h || "queue");
   buildHeatLayer();
+  initScan();
+
+  // ?autoscan=<sample filename> runs a scan on load. Doubles as a shareable
+  // "here is the model working" link and as the hook the browser test drives.
+  const auto = new URLSearchParams(location.search).get("autoscan");
+  if (auto) {
+    setView("scan", false);
+    const sel = $("scan-sample");
+    if ([...sel.options].some(o => o.value === auto)) sel.value = auto;
+    runScan(`samples/${auto}`, auto);
+  }
   setInterval(tickSla, 1000);
   window.addEventListener("hashchange", () => {
     const hh = location.hash.slice(1);

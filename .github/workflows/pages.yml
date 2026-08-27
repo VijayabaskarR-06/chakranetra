@@ -39,11 +39,23 @@ jobs:
           print(f"{len(data['tickets'])} tickets will render")
           PY
 
+      - name: Assemble the site
+        run: |
+          mkdir -p _site
+          cp -r dashboard/. _site/
+          # The in-browser scanner offers the dataset samples, which live
+          # outside dashboard/ so the Python pipeline can share them.
+          mkdir -p _site/samples
+          cp data/samples/*.jpg _site/samples/
+          test -f _site/model/pothole-seg.onnx
+          echo "site contents:"; find _site -maxdepth 2 -type f | sort
+          du -sh _site
+
       - uses: actions/configure-pages@v5
 
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: dashboard
+          path: _site
 
       - id: deployment
         uses: actions/deploy-pages@v4
