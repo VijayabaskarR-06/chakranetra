@@ -2,6 +2,12 @@
 
 **Every vehicle becomes a road inspector. Every defect becomes an accountable municipal ticket. Every repair is tracked for quality. Problems are predicted before they happen.**
 
+### ▶ [Open the live operations console](https://vijayabaskarr-06.github.io/chakranetra/)
+
+The console runs on real output from this repository — 7 tickets produced by scanning the
+sample trip in `data/samples/`. Pan the map, filter the work queue, move a ticket through
+the civic workflow. For live image scanning, run the API locally (see Quickstart below).
+
 Chakranetra takes ordinary dashcam or CCTV footage, finds road infrastructure defects
 (potholes today; cracks, broken footpaths, missing zebra crossings next), and converts
 each *unique physical defect* into a routed, costed, SLA-tracked ticket for the

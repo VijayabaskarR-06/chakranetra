@@ -1,0 +1,49 @@
+name: Deploy dashboard
+
+# Publishes dashboard/ to GitHub Pages. The console falls back to the
+# committed demo_data.js when no API is reachable, so the static build is a
+# fully working operations console — map, work queue, filters, SLA timers.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify the dashboard can render without an API
+        run: |
+          test -f dashboard/index.html
+          test -f dashboard/demo_data.js
+          python3 - <<'PY'
+          import json
+          s = open("dashboard/demo_data.js").read()
+          data = json.loads(s[s.index("{"):s.rindex("}") + 1])
+          assert data["tickets"], "demo_data.js has no tickets"
+          print(f"{len(data['tickets'])} tickets will render")
+          PY
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dashboard
+
+      - id: deployment
+        uses: actions/deploy-pages@v4
