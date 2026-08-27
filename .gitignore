@@ -55,6 +55,7 @@ htmlcov/
 *.jpeg
 *.png
 !data/samples/*.jpg
+!docs/screenshots/*.png
 
 # ── Editors / OS ────────────────────────────────────────────────────────
 .idea/

@@ -8,6 +8,24 @@ The console runs on real output from this repository — 7 tickets produced by s
 sample trip in `data/samples/`. Pan the map, filter the work queue, move a ticket through
 the civic workflow. For live image scanning, run the API locally (see Quickstart below).
 
+![Chakranetra operations console](docs/screenshots/dashboard.png)
+
+*The live console. Seven deduplicated defects plotted along Bengaluru's Outer Ring Road,
+coloured by severity — red L4 Critical, amber L3 High, green repaired. The work queue on
+the right is sorted by priority score, each row carrying its estimated cost, assigned
+engineer and SLA countdown.*
+
+### What the model actually sees
+
+![YOLOv8 segmentation output on the sample trip](docs/screenshots/detections.png)
+
+*Real YOLOv8-seg output on `data/samples/`, written to `output/` by `python run_demo.py`.
+Pixel masks rather than boxes, because a pothole is round-ish and a box always over-counts
+its area — and area is what drives the severity band. Left: one defect seen on both
+simulated vehicle passes, merged into a single ticket that gets **stronger**, not
+duplicated. Centre: two separate holes in one frame, correctly kept apart by the
+same-frame separation rule, both scoring L4 Critical.*
+
 Chakranetra takes ordinary dashcam or CCTV footage, finds road infrastructure defects
 (potholes today; cracks, broken footpaths, missing zebra crossings next), and converts
 each *unique physical defect* into a routed, costed, SLA-tracked ticket for the

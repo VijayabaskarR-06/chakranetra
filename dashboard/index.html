@@ -23,6 +23,11 @@
     --ok: #36C98E;
     --mono: "IBM Plex Mono", monospace;
   }
+  /* Darken the light OSM raster to match the console's asphalt palette.
+     Scoped to the tile pane so severity markers keep their true colours. */
+  .leaflet-tile-pane {
+    filter: invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.88) saturate(0.55);
+  }
   * { box-sizing: border-box; margin: 0; }
   html, body { height: 100%; }
   body {
@@ -223,8 +228,12 @@ async function loadData() {
 let map, markers = {};
 function initMap() {
   map = L.map("map", { zoomControl: true });
-  L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
-    attribution: "&copy; OpenStreetMap &copy; CARTO", maxZoom: 19,
+  // CARTO's dark basemap CDN now serves an "API KEY REQUIRED" watermark on
+  // unkeyed requests, which silently broke the map (tiles still return 200).
+  // OpenStreetMap's standard tiles need no key; the CSS filter on
+  // .leaflet-tile-pane below inverts them to match the asphalt theme.
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    attribution: "&copy; OpenStreetMap contributors", maxZoom: 19,
   }).addTo(map);
 }
 function drawMarkers() {
