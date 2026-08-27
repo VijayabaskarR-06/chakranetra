@@ -134,6 +134,21 @@ class TestScanValidation:
         assert r.status_code == 400
         assert "readable image" in r.json()["detail"]
 
+    def test_oversized_upload_rejected(self, client):
+        """Unauthenticated endpoint + no size cap = one request fills the disk."""
+        big = b"\xff\xd8\xff" + os.urandom(13 * 1024 * 1024)
+        r = client.post("/api/scan/image",
+                        files={"file": ("big.jpg", big, "image/jpeg")},
+                        data={"lat": 12.9, "lon": 77.6})
+        assert r.status_code == 413
+        assert "limit" in r.json()["detail"].lower()
+
+    def test_cors_does_not_allow_credentials(self, client):
+        """'*' plus allow_credentials=True lets any site make credentialed
+        requests, because Starlette reflects the caller's origin back."""
+        r = client.get("/api/stats", headers={"Origin": "https://evil.example"})
+        assert r.headers.get("access-control-allow-credentials") != "true"
+
     def test_missing_coordinates_422(self, client):
         r = client.post("/api/scan/image",
                         files={"file": ("a.jpg", b"x", "image/jpeg")})

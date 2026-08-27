@@ -24,7 +24,6 @@ Endpoints:
 from __future__ import annotations
 
 import os
-import shutil
 import tempfile
 from contextlib import asynccontextmanager
 from typing import Optional
@@ -105,13 +104,22 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Chakranetra", version="2.0.0", lifespan=lifespan)
 
+# allow_origins=["*"] with allow_credentials=True makes Starlette reflect the
+# caller's origin back, which effectively lets any site issue credentialed
+# requests. This API carries no cookies or auth, so credentials are simply off
+# and the wildcard is then safe and honest.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
+
+# Largest scan upload we will buffer. Without a cap, one request can fill the
+# container's disk — the endpoint is unauthenticated by design (citizen
+# reporting), so the cap is the only thing standing between it and a bad day.
+MAX_UPLOAD_BYTES = 12 * 1024 * 1024
 
 
 class ScanRequest(BaseModel):
@@ -174,9 +182,16 @@ async def scan_image(
 
     tmp_path = None
     try:
+        written = 0
         with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
-            shutil.copyfileobj(file.file, tmp)
             tmp_path = tmp.name
+            while chunk := file.file.read(1024 * 1024):
+                written += len(chunk)
+                if written > MAX_UPLOAD_BYTES:
+                    raise HTTPException(
+                        413, f"Image exceeds the {MAX_UPLOAD_BYTES // (1024*1024)} MB limit"
+                    )
+                tmp.write(chunk)
 
         # A declared image/* content-type is not proof the bytes decode.
         # Without this check a truncated or corrupt upload reached YOLO and
