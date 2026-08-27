@@ -1,8 +1,8 @@
-# RoadLens AI v2.0
+# Chakranetra v2.0
 
 **Every vehicle becomes a road inspector. Every defect becomes an accountable municipal ticket. Every repair is tracked for quality. Problems are predicted before they happen.**
 
-RoadLens AI takes ordinary dashcam or CCTV footage, finds road infrastructure defects
+Chakranetra takes ordinary dashcam or CCTV footage, finds road infrastructure defects
 (potholes today; cracks, broken footpaths, missing zebra crossings next), and converts
 each *unique physical defect* into a routed, costed, SLA-tracked ticket for the
 municipal road department — closing the loop the problem statement asks for:
@@ -12,7 +12,7 @@ municipal road department — closing the loop the problem statement asks for:
 India's Ministry of Road Transport & Highways attributes thousands of road deaths in
 recent years to pothole-related accidents. Cities don't lack the will to fix roads —
 they lack a **trustworthy, deduplicated, prioritized list of what is broken, where,
-and how urgent it is**. That list is what RoadLens produces, automatically, from
+and how urgent it is**. That list is what Chakranetra produces, automatically, from
 vehicles that are already driving the roads anyway.
 
 ---
@@ -20,12 +20,12 @@ vehicles that are already driving the roads anyway.
 ## Why this is different from "a model that draws boxes on potholes"
 
 Most computer-vision demos stop at detection. Detection alone is useless to a city.
-RoadLens is built around the problems that actually break real deployments:
+Chakranetra is built around the problems that actually break real deployments:
 
 ### 1. Deduplication — the killer problem
 A dashcam at 30 fps sees the same pothole in ~40 consecutive frames. Tomorrow, three
 more vehicles drive past it. A naive system files 160 tickets for one hole, and the
-municipal officer stops trusting the dashboard on day one. RoadLens merges every
+municipal officer stops trusting the dashboard on day one. Chakranetra merges every
 sighting of the same physical defect (GPS clustering via haversine distance, with a
 same-frame separation rule so two adjacent potholes are never wrongly merged) into
 **one ticket that gets *stronger* with each sighting** — more sightings means higher
@@ -46,12 +46,12 @@ No self-reported paperwork. And if a later scan still sees it → `REOPENED`.
 ### 4. Predictive Recurrence Prevention (NEW in v2.0)
 This is the feature that **prevents problems from coming back**:
 
-- **Recurrence Tracking**: When a defect reappears at a previously fixed location, RoadLens automatically flags it, tracks how many times it has recurred, and calculates a repair quality score for the assigned crew.
+- **Recurrence Tracking**: When a defect reappears at a previously fixed location, Chakranetra automatically flags it, tracks how many times it has recurred, and calculates a repair quality score for the assigned crew.
 - **Repair Quality Scores**: Each crew gets a quality score based on how often their repairs hold up. Crews with consistently low scores are flagged for retraining.
-- **Risk Heatmaps**: RoadLens identifies road segments with historically high defect density so cities can schedule preventive resurfacing BEFORE new holes form.
+- **Risk Heatmaps**: Chakranetra identifies road segments with historically high defect density so cities can schedule preventive resurfacing BEFORE new holes form.
 - **Predictive Alerts**: When a road segment crosses the recurrence threshold, the system raises a preventive-maintenance alert on `/api/predictive/alerts` BEFORE citizens complain, with the recommended action and an estimated preventive cost.
 
-This transforms RoadLens from a reactive patching system into a **preventive maintenance platform**.
+This transforms Chakranetra from a reactive patching system into a **preventive maintenance platform**.
 
 ### 5. Production-Ready Infrastructure (NEW in v2.0)
 - Structured JSON logging for every operation
@@ -66,7 +66,7 @@ This transforms RoadLens from a reactive patching system into a **preventive mai
 ## What's in the box
 
 ```
-roadlens-ai/
+chakranetra/
 ├── run_demo.py                ← one command, full pipeline, no API keys, CPU-only
 ├── config.yaml                ← all tunable parameters in one place
 ├── Dockerfile                 ← production-ready container
@@ -148,14 +148,14 @@ Priority (0–100) = size (up to 60) + model confidence (up to 25) + repeat sigh
 ## Predictive Engine — How It Prevents Problems
 
 ### Recurrence Tracking Flow
-1. When a ticket is marked `FIXED`, RoadLens registers it for monitoring (90-day window by default).
+1. When a ticket is marked `FIXED`, Chakranetra registers it for monitoring (90-day window by default).
 2. If a later scan detects a defect within 15 m of the original location, a recurrence is recorded against the *original* ticket, that ticket moves to `REOPENED`, and the new sighting still gets its own ticket. Matching is by location, not by ticket id — a defect that comes back is always detected as a brand-new sighting.
 3. Each recurrence reduces the repair quality score by 25%.
 4. At 2+ recurrences: "high" severity alert, full-depth repair recommended.
 5. At 4+ recurrences: "critical" alert, contractor review triggered.
 
 ### Risk Heatmap
-RoadLens divides the city into a grid and computes a risk score for each cell based on:
+Chakranetra divides the city into a grid and computes a risk score for each cell based on:
 - Defect frequency in the last 30 days (40% weight)
 - Total historical defect density (30% weight)
 - Recurrence rate (30% weight)
