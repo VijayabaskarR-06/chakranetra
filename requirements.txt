@@ -1,10 +1,25 @@
-# RoadLens AI — everything runs on CPU, no GPU or API keys needed
+# Chakranetra — everything runs on CPU, no GPU or API keys needed
 ultralytics>=8.2          # YOLOv8 inference
 huggingface_hub>=0.23     # one-time model download (then cached)
 opencv-python-headless>=4.9
-fastapi>=0.111
+# Floor raised deliberately: fastapi <0.116 pins starlette <0.39, while
+# streamlit needs starlette >=0.40. Installing both with the old floor yields
+# a broken pair that only fails at import time
+# ("Router.__init__() got an unexpected keyword argument 'on_startup'").
+fastapi>=0.141
 uvicorn>=0.30
 python-multipart>=0.0.9   # file uploads
 pyyaml>=6.0               # configuration management
 pytest>=7.0               # testing
 pytest-cov>=4.0           # test coverage
+
+# Streamlit Community Cloud entry point (streamlit_app.py). Not needed to run
+# the FastAPI server or the test suite.
+streamlit>=1.50            # width="stretch" API (use_container_width is removed)
+
+# Pull CPU-only torch wheels. PyPI's default torch build ships CUDA and is
+# several GB, which blows past free-tier disk and memory limits; the +cpu local
+# version sorts higher, so pip prefers it from this index.
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch
+torchvision

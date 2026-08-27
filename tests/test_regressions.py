@@ -181,6 +181,28 @@ class TestLocationRecurrence:
         assert e.check_recurrence_at_location(12.97, 77.59, "crack") is None
         e.conn.close()
 
+    def test_one_repair_cannot_fail_twice_in_one_scan(self, db_path):
+        """Two separate potholes in one frame both used to match the same
+        repaired spot, recording two failures of a single patch and halving
+        the crew's quality score for one bad repair."""
+        e = PredictiveEngine(db_path)
+        e.register_fixed_ticket("RL-POT-2026-0001", 12.97, 77.59, "pothole",
+                                assigned_crew="Crew A")
+        claimed = set()
+        hits = []
+        # two distinct defects, both within the recurrence radius
+        for dlat in (0.00001, 0.00002):
+            hit = e.check_recurrence_at_location(
+                12.97 + dlat, 77.59, "pothole", exclude_ticket_ids=claimed)
+            if hit:
+                claimed.add(hit["original_ticket_id"])
+                hits.append(hit)
+        assert len(hits) == 1, "one repair was blamed twice by one scan"
+        assert hits[0]["recurrence_count"] == 1
+        crew = e.get_crew_performance()[0]
+        assert crew["avg_quality_score"] == 0.75
+        e.conn.close()
+
     def test_ignores_repairs_outside_monitoring_window(self, db_path):
         e = PredictiveEngine(db_path)
         long_ago = datetime.now(timezone.utc) - timedelta(days=e.monitoring_window_days + 30)

@@ -237,7 +237,8 @@ class PredictiveEngine:
         }
 
     def find_repair_at_location(self, lat: float, lon: float, defect_type: str,
-                                now: datetime | None = None) -> str | None:
+                                now: datetime | None = None,
+                                exclude_ticket_ids: set | None = None) -> str | None:
         """Return the ticket id of a previously-FIXED defect at this spot.
 
         `check_recurrence` can only match a ticket id you already know. But a
@@ -253,8 +254,14 @@ class PredictiveEngine:
             "SELECT * FROM recurrence_records WHERE defect_type = ?", (defect_type,)
         ).fetchall()
 
+        exclude = exclude_ticket_ids or set()
         best_id, best_dist = None, None
         for r in rows:
+            # One repair record can only fail once per scan. Without this, two
+            # separate potholes in the same frame both match the same repaired
+            # spot and it is recorded as two failures of one patch.
+            if r["original_ticket_id"] in exclude:
+                continue
             # Only defects still inside their monitoring window count; an old
             # hole reappearing after two years is new wear, not a bad repair.
             if _parse_ts(r["first_fixed_at"], cutoff) < cutoff:
@@ -265,9 +272,17 @@ class PredictiveEngine:
         return best_id
 
     def check_recurrence_at_location(self, lat: float, lon: float, defect_type: str,
-                                     now: datetime | None = None) -> dict | None:
-        """Location-based recurrence check, for the live re-scan path."""
-        ticket_id = self.find_repair_at_location(lat, lon, defect_type, now=now)
+                                     now: datetime | None = None,
+                                     exclude_ticket_ids: set | None = None) -> dict | None:
+        """Location-based recurrence check, for the live re-scan path.
+
+        Pass `exclude_ticket_ids` with the repairs already matched earlier in
+        the same scan so one patch cannot be blamed twice by two neighbouring
+        defects.
+        """
+        ticket_id = self.find_repair_at_location(
+            lat, lon, defect_type, now=now, exclude_ticket_ids=exclude_ticket_ids
+        )
         if ticket_id is None:
             return None
         return self.check_recurrence(ticket_id, lat, lon, defect_type, now=now)

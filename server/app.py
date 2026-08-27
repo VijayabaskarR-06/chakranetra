@@ -213,11 +213,14 @@ async def scan_image(
         # Close the accountability loop: if this spot was repaired recently,
         # a fresh detection here is a failed repair, not just a new pothole.
         recurrences = []
+        claimed: set[str] = set()
         for cluster, ticket in zip(clusters, tickets):
             hit = get_predictive().check_recurrence_at_location(
-                lat=cluster.lat, lon=cluster.lon, defect_type=cluster.defect_type
+                lat=cluster.lat, lon=cluster.lon, defect_type=cluster.defect_type,
+                exclude_ticket_ids=claimed,
             )
             if hit:
+                claimed.add(hit["original_ticket_id"])
                 get_store().record_recurrence(hit["original_ticket_id"])
                 get_store().update_status(
                     hit["original_ticket_id"], "REOPENED",
