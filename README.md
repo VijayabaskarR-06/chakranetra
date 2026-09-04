@@ -156,11 +156,22 @@ chakranetra/
 │   ├── tickets.py             SQLite ticket registry + lifecycle + recurrence
 │   ├── predictive.py          recurrence tracking, risk heatmaps, crew scores
 │   ├── config.py              configuration management (YAML + env vars)
-│   └── logger.py              structured JSON logging
+│   ├── logger.py              structured JSON logging
+│   └── ml/                    ← Chakranetra's OWN models (not pretrained)
+│       ├── gbt.py             gradient-boosted trees, written out in NumPy
+│       ├── features.py        one feature definition, shared by train + serve
+│       ├── models.py          cost / degradation / repair-failure / budget
+│       ├── bootstrap.py       labelled synthetic corpus, for demo only
+│       └── registry.py        train, save, load, and provenance
 ├── server/app.py              FastAPI: scan upload API + ticket API + predictive API + dashboard
 ├── dashboard/index.html       municipal road-operations console (map + work queue)
 ├── data/samples/              real road photos (pothole-segmentation dataset)
 ├── data/demo_route.gpx        demo dashcam GPS track (Bengaluru ORR)
+├── models/                    trained model weights, as plain JSON
+├── tools/
+│   ├── train_models.py        `make train` — fits the models, prints the metrics
+│   ├── generate_ml_js.py      exports the cost model for the browser
+│   └── generate_rules_js.py   exports the severity rules for the browser
 ├── tests/                     comprehensive test suite
 ├── .github/workflows/ci.yml   CI/CD pipeline
 └── docs/ARCHITECTURE.md       data flow, module boundaries, design decisions
@@ -202,6 +213,12 @@ docker compose up --build
 | `GET /api/predictive/heatmap` | risk heatmap data for visualization |
 | `GET /api/predictive/crews` | crew performance scores |
 | `GET /api/predictive/segments` | computed risk segments |
+| `POST /api/tickets/{id}/cost` | record what a repair **actually** cost — the label the cost model learns from |
+| `GET /api/ml/status` | which models are trained, on what data, and how they scored |
+| `GET /api/ml/cost/{id}` | predicted repair cost, with a conformal interval and a per-feature explanation |
+| `GET /api/ml/forecast/{id}` | days until this defect reaches the next severity band |
+| `GET /api/ml/failure/{id}` | probability this repair fails and the defect returns |
+| `GET /api/ml/budget` | 30/60/90-day spend forecast with a simulated band |
 | `GET /` | the road-operations dashboard |
 
 Interactive docs are auto-generated at `/docs`.
@@ -248,6 +265,146 @@ Each crew gets an average quality score across all their monitored repairs:
 
 ---
 
+---
+
+## Chakranetra's own models
+
+The detector is somebody else's network — a pretrained YOLOv8-seg, and the README
+says so. Everything in `roadlens/ml/` is this project's own: four models built on a
+gradient-boosted-tree learner written out in NumPy, trained here, and tested here.
+
+| Model | Predicts | Beats |
+|---|---|---|
+| `CostModel` | rupee cost of a repair, with a 90% interval | the rules engine, by **65% lower held-out MAE** |
+| `DegradationModel` | days until a defect reaches the next severity band | the fleet-average growth rate, by **22%** |
+| `RepairFailureModel` | P(this repair fails and the defect returns) | the base rate — **AUC 0.72**, lower Brier |
+| `BudgetForecast` | ward-level 30/60/90-day spend, with a band | — composes the two above |
+
+### They correct the rule, they do not replace it
+
+`severity.py` argues that arithmetic deciding public spending must be explainable,
+and it is right. So the cost model does not predict cost. It predicts
+`log(actual) − log(rules_estimate)` — the *correction* to the rule — which has three
+consequences that fall out for free:
+
+- **Cold start is exact, not approximate.** An ensemble with zero trees returns the
+  rules estimate to the last rupee. A city that has recorded no invoices sees exactly
+  today's behaviour, and `source: "rules"` on every response saying why.
+- **Predictions cannot go negative,** and the interval is multiplicative — ±26%,
+  not ±₹4,000. Repair-cost error scales with cost; a fixed rupee band is absurdly
+  wide on a hairline crack and absurdly tight on a highway cavity.
+- **`explain()` reads as percentages off the rule**, with one-hot columns summed
+  back into the field they came from — `road_class = highway  +81.8%` is a sentence
+  a municipal officer can check against their own experience. (Attributing that
+  credit to the individual column a tree happened to split on is technically
+  accurate and reads as nonsense: on a highway ticket it prints
+  `road_class=residential`, because the split is testing *not residential*.)
+
+What the model learns that the rule *cannot express* is the point. The rules engine
+prices a defect from its size alone, so it returns the same number for the same hole
+on a national highway and a residential lane. The model prices them **2.9× apart**
+(₹20,641 against ₹7,230, off an identical ₹10,800 rule), because highway work needs
+lane closure, night working and a heavier mix. That gap is a test:
+
+```python
+def test_cost_model_learns_the_road_class_effect_the_rule_cannot_express(registry):
+    assert highway["rules_inr"] == residential["rules_inr"]      # the rule cannot tell
+    assert highway["predicted_inr"] > residential["predicted_inr"] * 1.5
+```
+
+### A model that cannot beat the rule does not get to serve
+
+Every `train()` scores itself against the baseline it would replace, on data it never
+saw, and **refuses to install itself if it is not better**. `tests/test_ml_models.py`
+proves the gate fires: given repair costs that are the rules estimate times pure
+noise, a 300-tree ensemble will happily learn the noise, and training rejects it —
+`status: "rejected_not_better_than_rules"`, and every prediction falls back to
+arithmetic. A learned model quietly worse than the formula it replaced is the most
+expensive failure mode here, and it is silent unless something checks.
+
+### The intervals are calibrated, and the calibration is measured
+
+Cost predictions carry **split-conformal** intervals: given exchangeable data they
+cover the true cost at the stated rate with no assumption about the error
+distribution. That is a claim, so it is tested — at three levels, on tickets the
+model never saw:
+
+```
+tests/test_ml_models.py::test_conformal_intervals_cover_at_their_stated_rate
+    alpha=0.05  →  coverage ≥ 0.95 − slack
+    alpha=0.10  →  coverage ≥ 0.90 − slack
+    alpha=0.20  →  coverage ≥ 0.80 − slack
+```
+
+The budget forecast's band comes from a Monte Carlo over those intervals rather than
+from summing them, because summing assumes every ticket is wrong in the same
+direction at once. Its two extra assumptions — lognormal errors, independent across
+tickets — are returned in the API response, in an `assumptions` array.
+
+### The training data is labelled, always
+
+**The models ship trained on synthetic data, and say so everywhere.** This repository
+contains no real repair invoices, so `roadlens/ml/bootstrap.py` generates a simulated
+city from a documented process, and a model fit to it is stamped
+`training_data: "synthetic_bootstrap"` — in the model JSON, in every API response, in
+the browser bundle, and as a red badge across the dashboard's Budget tab reading
+*"no figure here should be quoted as if they did"*. There is no configuration that
+makes it look real.
+
+A model trained there can only rediscover the process that generated it. It
+demonstrates that the machinery works. It says nothing about Bengaluru's actual
+repair costs.
+
+The moment a city posts real invoices to `POST /api/tickets/{id}/cost` and re-runs
+`make train`, the registry trains on those instead and the label flips to `observed`.
+That switch is also a test.
+
+### The cost model runs in the browser, and is pinned there
+
+The console already runs YOLOv8-seg client-side. A cost estimate that had to
+round-trip to a server would break that promise and leave the hosted GitHub Pages
+console showing nothing, so the ensemble ships as JSON and evaluates in the browser —
+and is held to the same standard as the severity rules:
+
+| Check | What it proves |
+|---|---|
+| `tests/test_ml_js_parity.py` | `dashboard/ml.generated.js` reproduces `roadlens.ml.CostModel` on 1 500 random tickets — rupees, interval bounds and the raw log-scale score to `1e-9` |
+| `tests/test_ml_js_parity.py` | Severity-band boundaries and all twelve months agree (`getUTCMonth()` is 0-based; Python's `.month` is not) |
+| `tests/test_ml_js_parity.py` | The bundle is regenerated from the trained model, and CI fails if it goes stale |
+| `tests/test_dashboard_budget.py` | The Budget panel's own source, executed under node: renders offline, escapes ticket ids, and discloses a synthetic model |
+
+Only the cost model is exported. Degradation and repair-failure need a defect's
+sighting history and a crew's repair record — data the browser does not have and
+should not be handed — so those stay server-side.
+
+### Training it
+
+```bash
+make train          # fits all three models, regenerates the browser bundle
+```
+
+```
+====================================================================
+  TRAINED ON SYNTHETIC DATA — demonstration only
+====================================================================
+cost         model_mae_inr 867   rules_mae_inr 2465   improvement 64.8%
+degradation  model_mae 0.0057    constant_mae 0.0074  improvement 22.5%
+failure      auc 0.7221          brier 0.2014         base_rate_brier 0.2263
+```
+
+### One bug this found on the way in
+
+The degradation model needs two sightings of *one* defect to measure growth. It could
+never have had them: `cluster_detections` deduplicates within a single scan, but the
+scan endpoint called `create_from_cluster` unconditionally, so re-scanning a road
+tomorrow filed a **second ticket for the same pothole** — duplicates in the queue, and
+no ticket ever accumulating a second observation. `TicketStore.find_open_at_location`
+now matches a cluster to the open ticket already covering that defect and appends to
+its growth history instead, revising the ticket's size and severity upward only
+(`/api/scan/image` reports these as `tickets_updated`).
+
+---
+
 ## Configuration
 
 All tunable parameters are in `config.yaml`:
@@ -288,13 +445,28 @@ export ROADLENS_DB_PATH=/data/roadlens.db
 pytest tests/ -v --cov=roadlens --cov-report=term-missing
 ```
 
+The JavaScript parity tests need `node` on the path and a trained model in `models/`;
+without either they skip rather than fail, so CI without node still passes. Run
+`make train` first to exercise them.
+
 ---
 
 ## Honest limitations (and the plan for each)
 
-- **Cost estimates use a calibration constant**, not measured metres. Production
-  calibrates per m² per road class from the camera geometry; the constants ship as
-  clearly-labelled defaults.
+- **The models ship trained on synthetic data.** This repository has no real repair
+  invoices, so `roadlens/ml/bootstrap.py` supplies a simulated city and every
+  prediction derived from it is labelled `synthetic_bootstrap` in the API, the
+  browser bundle and the dashboard. The machinery is real and tested; the *numbers*
+  become meaningful only once a city posts real costs to
+  `POST /api/tickets/{id}/cost` and re-runs `make train`.
+- **The rules-engine cost baseline still uses a calibration constant**, not measured
+  metres. Production calibrates per m² per road class from the camera geometry. The
+  learned cost model corrects that baseline rather than replacing the need to
+  calibrate it.
+- **`road_class` is a ticket field, not something the vision model infers.** It is the
+  cost model's strongest feature, and today it defaults to `arterial` unless a city
+  supplies it. Joining tickets against an existing road-network layer is the obvious
+  next step and needs no model change.
 - **The bundled model detects potholes only.** The detector is a plug-in behind one
   interface — training YOLOv8 on a multi-class dataset extends coverage with zero
   changes elsewhere; department routing for those classes is already wired.
@@ -302,9 +474,13 @@ pytest tests/ -v --cov=roadlens --cov-report=term-missing
   urban deployments can add visual re-identification as a second merge signal.
 - **SQLite is a pilot database.** Single-writer is fine for one city ward; the
   `TicketStore` interface swaps to Postgres unchanged at scale.
-- **Predictive model is rules-based**, not ML. This is intentional — cities need
-  explainable predictions. A future version can layer ML-based deterioration modeling
-  on top of the existing rules engine.
+- **The recurrence/heatmap engine in `predictive.py` is still rules-based**, and
+  deliberately stays that way — those thresholds are what a city argues about in a
+  council meeting. The learned models in `roadlens/ml/` layer on top of it rather
+  than replacing it, and each one falls back to the rule when it cannot do better.
+- **The degradation model needs history that a new deployment does not have yet.**
+  It trains on pairs of sightings of the same defect, so a city gets its first
+  forecast after a road has been driven twice, weeks apart — not on day one.
 
 ---
 

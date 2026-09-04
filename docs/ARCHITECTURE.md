@@ -34,7 +34,24 @@
    │  tickets.py         │    FIXED → VERIFIED (AI re-scan confirms)
    │  SQLite registry    │              └→ REOPENED if still detected
    └─────────┬───────────┘
-             ▼
+             │  a cluster matching an OPEN ticket within the merge
+             │  radius appends to that ticket's growth history
+             │  rather than filing a duplicate
+             ├──────────────────────────────┐
+             │                              ▼
+             │                 ┌─────────────────────────────┐
+             │                 │  roadlens/ml/               │
+             │                 │  gradient-boosted trees     │
+             │                 │  (NumPy, ~400 lines)        │
+             │                 │                             │
+             │                 │  cost        ₹ + interval   │
+             │                 │  degradation days to L(n+1) │
+             │                 │  failure     P(comes back)  │
+             │                 │  budget      30/60/90 spend │
+             │                 └─────────────┬───────────────┘
+             │        each corrects severity.py's rule and falls
+             │        back to it when it cannot beat it
+             ▼                               ▼
    ┌─────────────────────────────────────────┐
    │  server/app.py (FastAPI)                │
    │  /api/scan  /api/tickets  /api/stats    │
@@ -66,6 +83,33 @@ outline drawn on it.
 
 **SQLite → Postgres is an interface swap.** `TicketStore` is the only class that
 touches the database.
+
+**The learned models correct the rules; they never replace them.** `roadlens/ml/`
+predicts the *residual* against `severity.py`, so an untrained model reproduces the
+rules engine exactly and cold start needs no special case. Training refuses to
+install a model that does not beat its baseline on held-out data, which means the
+worst case for the ML layer is today's behaviour, not a silent regression. This is
+the "add ML only where it earns its complexity" rule above, made mechanical.
+
+**The learner is hand-written rather than imported.** scikit-learn cannot run in the
+browser, and `dashboard/scan.js` has already promised that the console works with no
+server. A tree ensemble serialises to JSON and evaluates in twenty lines of
+JavaScript, so `tools/generate_ml_js.py` emits the same cost model client-side and
+`tests/test_ml_js_parity.py` pins the two together at `1e-9` — the same standard
+`tests/test_js_parity.py` holds the severity rules to.
+
+**Provenance is a field, not a footnote.** No repository ships real repair invoices,
+so the models train on a labelled synthetic corpus until a city records its own. That
+fact travels as `training_data` through the model file, every API response, the
+browser bundle and a badge on the dashboard. There is no setting that hides it.
+
+## Where a second data source plugs in
+
+The cost model's strongest feature is `road_class`, and today it is a ticket field
+defaulting to `arterial`. Joining tickets against a municipal road-network layer
+fills it from geometry with no model change — `roadlens/ml/features.py` already
+carries the vocabulary, and an unseen class lands in an `__other__` column rather
+than shifting every one-hot column to its right.
 
 ## Scaling path
 

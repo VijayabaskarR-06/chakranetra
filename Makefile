@@ -1,4 +1,4 @@
-.PHONY: install test lint demo run docker-up docker-down clean
+.PHONY: install test lint demo train run docker-up docker-down clean
 
 install:
 	pip install -r requirements.txt
@@ -11,6 +11,14 @@ lint:
 
 demo:
 	python run_demo.py
+
+# Train Chakranetra's own models (cost / degradation / repair failure) and
+# regenerate the browser bundle. Trains on recorded repair costs when the
+# database has enough of them, and on the labelled synthetic corpus when it
+# does not -- see roadlens/ml/bootstrap.py.
+train:
+	python tools/train_models.py
+	python tools/generate_ml_js.py
 
 run:
 	uvicorn server.app:app --reload

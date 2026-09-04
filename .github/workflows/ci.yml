@@ -34,6 +34,15 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      # The JS parity tests need node. They run against the *committed*
+      # models/ and dashboard/ml.generated.js rather than retraining, so
+      # test_generated_bundle_is_not_stale actually checks the artifacts that
+      # ship -- retraining first would make it compare a file to itself.
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
       - name: Run tests with coverage
         run: |
           pytest tests/ -v --cov=roadlens --cov-report=xml --cov-report=term-missing
