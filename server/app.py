@@ -12,6 +12,7 @@ Then open:
 
 Endpoints:
     POST /api/scan/image      upload a road photo (+ lat/lon) -> tickets
+    POST /api/scan/video      upload dashcam footage (+ GPS track or lat/lon) -> tickets
     GET  /api/tickets         list tickets (filter by status/department)
     GET  /api/tickets/{id}    one ticket with full history
     POST /api/tickets/{id}/status   move it through the workflow
@@ -29,8 +30,10 @@ Endpoints:
 
 from __future__ import annotations
 
+import math
 import os
 import tempfile
+import xml.etree.ElementTree as ET
 from contextlib import asynccontextmanager
 from typing import Optional
 
@@ -43,8 +46,8 @@ from pydantic import BaseModel, field_validator
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from roadlens.dedup import cluster_detections          # noqa: E402
-from roadlens.geo import attach_gps_manual             # noqa: E402
+from roadlens.dedup import cluster_detections                          # noqa: E402
+from roadlens.geo import GpxTrack, attach_gps_from_track, attach_gps_manual  # noqa: E402
 from roadlens.tickets import TicketStore, STATUSES     # noqa: E402
 from roadlens.predictive import PredictiveEngine       # noqa: E402
 from roadlens.logger import get_logger                 # noqa: E402
@@ -128,6 +131,14 @@ app.add_middleware(
 # reporting), so the cap is the only thing standing between it and a bad day.
 MAX_UPLOAD_BYTES = 12 * 1024 * 1024
 
+# Video is the same story at a different scale: a few minutes of 720p dashcam
+# footage runs tens of MB. 150 MB covers a realistic clip without letting one
+# upload park a feature-length file on disk.
+MAX_VIDEO_UPLOAD_BYTES = 150 * 1024 * 1024
+MAX_GPX_UPLOAD_BYTES = 5 * 1024 * 1024      # a GPS track is plain text; this is generous
+
+ALLOWED_VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
+
 
 class ScanRequest(BaseModel):
     """Validated scan coordinates. (The multipart endpoint below validates
@@ -201,6 +212,91 @@ async def general_error_handler(request, exc):
     return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
 
+def _save_capped_upload(file: UploadFile, suffix: str, max_bytes: int) -> str:
+    """Stream an upload to a temp file, aborting once it exceeds `max_bytes`.
+
+    Shared by every upload endpoint so the cap-and-cleanup behaviour — and the
+    413 it raises — is written once. Streaming in chunks rather than reading
+    the whole body first means an oversized upload is rejected without ever
+    holding the full thing in memory.
+    """
+    written = 0
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        tmp_path = tmp.name
+        while chunk := file.file.read(1024 * 1024):
+            written += len(chunk)
+            if written > max_bytes:
+                tmp.close()
+                os.unlink(tmp_path)
+                raise HTTPException(
+                    413, f"{file.filename or 'upload'} exceeds the "
+                         f"{max_bytes // (1024 * 1024)} MB limit"
+                )
+            tmp.write(chunk)
+    return tmp_path
+
+
+def _file_and_track(detections: list) -> dict:
+    """Turn raw detections into filed tickets — shared by the image and video
+    scan endpoints, so a photo and a dashcam clip land in the queue the same
+    way and are tested once.
+
+    Every cluster either grows an already-open ticket for the same physical
+    defect, or becomes a new one. Recurrence — "was this spot repaired and is
+    it damaged again?" — is only meaningful for the *new* branch: a cluster
+    that matched an open ticket is adding a sighting to a defect already in
+    the queue, not reappearing at a spot someone signed off as fixed, so
+    running the recurrence check on it as well would be checking a question
+    that does not apply and could, on a coincidence of geography, misfire.
+    """
+    clusters = cluster_detections(detections)
+
+    filed = []   # [{"cluster": DefectCluster, "ticket": dict, "is_new": bool}, ...]
+    for c in clusters:
+        existing = get_store().find_open_at_location(c.lat, c.lon, c.defect_type)
+        if existing:
+            filed.append({"cluster": c, "ticket": get_store().record_growth(existing, c),
+                          "is_new": False})
+        else:
+            filed.append({"cluster": c, "ticket": get_store().create_from_cluster(c),
+                          "is_new": True})
+
+    recurrences = []
+    claimed: set[str] = set()
+    for f in filed:
+        if not f["is_new"]:
+            continue
+        c = f["cluster"]
+        hit = get_predictive().check_recurrence_at_location(
+            lat=c.lat, lon=c.lon, defect_type=c.defect_type, exclude_ticket_ids=claimed,
+        )
+        if hit:
+            claimed.add(hit["original_ticket_id"])
+            get_store().record_recurrence(hit["original_ticket_id"])
+            get_store().update_status(
+                hit["original_ticket_id"], "REOPENED",
+                note=f"Defect detected again during scan; new ticket {f['ticket']['id']}",
+            )
+            recurrences.append(hit)
+
+    result = {
+        "defects_found": len(detections),
+        "unique_defects": len(clusters),
+        "tickets_created": [f["ticket"]["id"] for f in filed if f["is_new"]],
+        # Re-sightings of defects already in the queue. Each one adds a point
+        # to that defect's growth history, which is what the degradation
+        # model trains on.
+        "tickets_updated": [f["ticket"]["id"] for f in filed if not f["is_new"]],
+        "recurrences": recurrences,
+    }
+    logger.info("Scan filed", defects_found=result["defects_found"],
+               unique_defects=result["unique_defects"],
+               tickets_created=len(result["tickets_created"]),
+               tickets_updated=len(result["tickets_updated"]),
+               recurrences=len(recurrences))
+    return result
+
+
 @app.post("/api/scan/image")
 async def scan_image(
     file: UploadFile = File(...),
@@ -218,16 +314,7 @@ async def scan_image(
 
     tmp_path = None
     try:
-        written = 0
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
-            tmp_path = tmp.name
-            while chunk := file.file.read(1024 * 1024):
-                written += len(chunk)
-                if written > MAX_UPLOAD_BYTES:
-                    raise HTTPException(
-                        413, f"Image exceeds the {MAX_UPLOAD_BYTES // (1024*1024)} MB limit"
-                    )
-                tmp.write(chunk)
+        tmp_path = _save_capped_upload(file, suffix=".jpg", max_bytes=MAX_UPLOAD_BYTES)
 
         # A declared image/* content-type is not proof the bytes decode.
         # Without this check a truncated or corrupt upload reached YOLO and
@@ -243,55 +330,10 @@ async def scan_image(
 
         detections = get_detector().detect_image(tmp_path, save_annotated_to=annotated)
         attach_gps_manual(detections, lat, lon)
-        clusters = cluster_detections(detections)
 
-        # A re-scan of a road already in the queue must not file the same
-        # pothole twice. A cluster landing within the merge radius of an
-        # existing open ticket for the same defect type is another sighting of
-        # that defect, so it is appended to that ticket's growth history
-        # instead of becoming a duplicate.
-        tickets, created_ids, updated_ids = [], [], []
-        for c in clusters:
-            existing = get_store().find_open_at_location(c.lat, c.lon, c.defect_type)
-            if existing:
-                tickets.append(get_store().record_growth(existing, c))
-                updated_ids.append(existing)
-            else:
-                tickets.append(get_store().create_from_cluster(c))
-                created_ids.append(tickets[-1]["id"])
-
-        # Close the accountability loop: if this spot was repaired recently,
-        # a fresh detection here is a failed repair, not just a new pothole.
-        recurrences = []
-        claimed: set[str] = set()
-        for cluster, ticket in zip(clusters, tickets):
-            hit = get_predictive().check_recurrence_at_location(
-                lat=cluster.lat, lon=cluster.lon, defect_type=cluster.defect_type,
-                exclude_ticket_ids=claimed,
-            )
-            if hit:
-                claimed.add(hit["original_ticket_id"])
-                get_store().record_recurrence(hit["original_ticket_id"])
-                get_store().update_status(
-                    hit["original_ticket_id"], "REOPENED",
-                    note=f"Defect detected again during scan; new ticket {ticket['id']}",
-                )
-                recurrences.append(hit)
-
-        logger.info("Scan completed", defects_found=len(detections),
-                    unique_defects=len(clusters), tickets_created=len(created_ids),
-                    tickets_updated=len(updated_ids), recurrences=len(recurrences))
-        return {
-            "defects_found": len(detections),
-            "unique_defects": len(clusters),
-            "tickets_created": created_ids,
-            # Re-sightings of defects already in the queue. Each one adds a
-            # point to that defect's growth history, which is what the
-            # degradation model trains on.
-            "tickets_updated": updated_ids,
-            "recurrences": recurrences,
-            "annotated_image": os.path.basename(annotated) if detections else None,
-        }
+        result = _file_and_track(detections)
+        result["annotated_image"] = os.path.basename(annotated) if detections else None
+        return result
     except HTTPException:
         raise
     except Exception as e:
@@ -305,6 +347,114 @@ async def scan_image(
                 os.unlink(tmp_path)
             except OSError:
                 pass
+
+
+@app.post("/api/scan/video")
+async def scan_video(
+    file: UploadFile = File(...),
+    gpx: Optional[UploadFile] = File(None),
+    lat: Optional[float] = Form(None),
+    lon: Optional[float] = Form(None),
+    fps: float = Form(30.0),
+    vehicle_id: Optional[str] = Form(None),
+):
+    """Dashcam / CCTV flow: a video clip (+ its GPS track) -> ticket(s).
+
+    Exactly the photo flow, run over sampled frames instead of one image: the
+    same detector, the same clustering, the same open-ticket matching and
+    recurrence check via `_file_and_track`. The only new work here is turning
+    "a video plus a GPS track" into the (lat, lon)-tagged detections that flow
+    already expects — from a real GPX recording when the vehicle was moving,
+    or a single fixed point for a stationary CCTV camera.
+    """
+    if gpx is None and (lat is None or lon is None):
+        raise HTTPException(
+            400, "Provide a GPS track (gpx) for a moving vehicle, or lat and "
+                 "lon for a stationary camera"
+        )
+    if lat is not None and not -90 <= lat <= 90:
+        raise HTTPException(400, "Latitude must be between -90 and 90")
+    if lon is not None and not -180 <= lon <= 180:
+        raise HTTPException(400, "Longitude must be between -180 and 180")
+    if fps <= 0:
+        raise HTTPException(400, "fps must be positive")
+
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    looks_like_video = (file.content_type or "").startswith("video/") or ext in ALLOWED_VIDEO_EXTENSIONS
+    if not looks_like_video:
+        raise HTTPException(400, "File must be a video")
+
+    video_path, gpx_path, annotated_dir = None, None, None
+    try:
+        video_path = _save_capped_upload(
+            file, suffix=ext if ext in ALLOWED_VIDEO_EXTENSIONS else ".mp4",
+            max_bytes=MAX_VIDEO_UPLOAD_BYTES,
+        )
+
+        import cv2
+
+        cap = cv2.VideoCapture(video_path)
+        opened = cap.isOpened()
+        frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) if opened else 0
+        readable, _ = cap.read() if opened else (False, None)
+        cap.release()
+        if not opened or not readable:
+            raise HTTPException(400, "File is not a readable video")
+
+        track = None
+        if gpx is not None:
+            gpx_path = _save_capped_upload(gpx, suffix=".gpx", max_bytes=MAX_GPX_UPLOAD_BYTES)
+            try:
+                track = GpxTrack.load(gpx_path)
+            except (ET.ParseError, ValueError) as e:
+                raise HTTPException(400, f"Invalid GPS track: {e}")
+
+        os.makedirs(OUTPUT_DIR, exist_ok=True)
+        annotated_dir = os.path.join(OUTPUT_DIR, f"scan_video_{os.path.basename(video_path)}")
+
+        sample_every = CONFIG.detector.video_sample_every_n_frames
+        detections = get_detector().detect_video(
+            video_path, sample_every_n_frames=sample_every, save_annotated_dir=annotated_dir,
+        )
+
+        if track is not None:
+            attach_gps_from_track(detections, track, fps=fps)
+            gps_source = "gpx"
+        else:
+            # Every detection pins to the one point given. Fine for a fixed
+            # CCTV camera; a moving vehicle with no track means every defect
+            # in the clip lands on the same coordinate, which is worth
+            # knowing about rather than discovering on the map later.
+            attach_gps_manual(detections, lat, lon)
+            gps_source = "manual"
+            logger.warning("Video scan used a single manual GPS point",
+                           source=file.filename, lat=lat, lon=lon)
+
+        result = _file_and_track(detections)
+        result["gps_source"] = gps_source
+        result["source"] = file.filename
+        if vehicle_id:
+            result["vehicle_id"] = vehicle_id
+        result["frames_analyzed"] = (
+            math.ceil(frame_count / sample_every) if frame_count > 0 else None
+        )
+        annotated_files = sorted(os.listdir(annotated_dir)) if os.path.isdir(annotated_dir) else []
+        result["annotated_frames"] = [
+            f"{os.path.basename(annotated_dir)}/{name}" for name in annotated_files
+        ]
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Video scan failed", error=str(e))
+        raise HTTPException(500, f"Video scan failed: {str(e)}")
+    finally:
+        for p in (video_path, gpx_path):
+            if p and os.path.exists(p):
+                try:
+                    os.unlink(p)
+                except OSError:
+                    pass
 
 
 @app.get("/api/tickets")

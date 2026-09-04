@@ -54,7 +54,8 @@
              ▼                               ▼
    ┌─────────────────────────────────────────┐
    │  server/app.py (FastAPI)                │
-   │  /api/scan  /api/tickets  /api/stats    │
+   │  /api/scan/image  /api/scan/video       │
+   │  /api/tickets  /api/stats  /api/ml/*    │
    └─────────┬───────────────────────────────┘
              ▼
    dashboard/index.html — map + prioritized work queue + SLA tracking
@@ -90,6 +91,13 @@ rules engine exactly and cold start needs no special case. Training refuses to
 install a model that does not beat its baseline on held-out data, which means the
 worst case for the ML layer is today's behaviour, not a silent regression. This is
 the "add ML only where it earns its complexity" rule above, made mechanical.
+
+**Image and video scans share one filing path.** `_file_and_track` in
+`server/app.py` — cluster, match against an already-OPEN ticket or create
+one, check recurrence only for the ones that were actually new — is called
+by both `/api/scan/image` and `/api/scan/video`. A clip is just more frames
+than a photo; the ticket-filing logic underneath does not need to know
+which one produced a given detection.
 
 **The learner is hand-written rather than imported.** scikit-learn cannot run in the
 browser, and `dashboard/scan.js` has already promised that the console works with no
