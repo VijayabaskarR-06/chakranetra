@@ -345,6 +345,7 @@
         <button class="tab" role="tab" id="tab-queue"   aria-selected="true"  aria-controls="panel-queue">Work queue<span class="count" id="c-queue">0</span></button>
         <button class="tab" role="tab" id="tab-predict" aria-selected="false" aria-controls="panel-predict">Predictive<span class="count" id="c-predict">0</span></button>
         <button class="tab" role="tab" id="tab-crews"   aria-selected="false" aria-controls="panel-crews">Crews<span class="count" id="c-crews">0</span></button>
+        <button class="tab" role="tab" id="tab-budget"  aria-selected="false" aria-controls="panel-budget">Budget<span class="count" id="c-budget">0</span></button>
         <button class="tab" role="tab" id="tab-scan"    aria-selected="false" aria-controls="panel-scan">Scan</button>
       </div>
     </div>
@@ -367,6 +368,7 @@
     </div>
     <div class="panel" id="panel-predict" role="tabpanel" aria-labelledby="tab-predict"></div>
     <div class="panel" id="panel-crews" role="tabpanel" aria-labelledby="tab-crews"></div>
+    <div class="panel" id="panel-budget" role="tabpanel" aria-labelledby="tab-budget"></div>
 
     <div class="panel" id="panel-scan" role="tabpanel" aria-labelledby="tab-scan">
       <div class="section-label">Scan a road photo</div>
@@ -415,6 +417,7 @@
 <script type="module">
 import { assess, haversineM, RULES } from "./rules.generated.js";
 import { detect, loadModel, renderOverlay, modelBytes } from "./scan.js";
+import { predictCost, costModelStatus } from "./ml.generated.js";
 
 const STATUSES = ["OPEN","ASSIGNED","IN_PROGRESS","FIXED","VERIFIED","REOPENED"];
 const SEV_COLORS = {4:"#FF4A3A",3:"#FF9330",2:"#F5C84C",1:"#6FA8DC"};
@@ -424,6 +427,7 @@ const STORE_KEY  = "chakranetra.overrides.v1";
 const state = {
   tickets: [], stats: {}, alerts: [], segments: [], crews: [], heatmap: [],
   live: false, activeId: null, view: "queue", overrides: {},
+  budget: null,
 };
 
 const $  = (id) => document.getElementById(id);
@@ -459,6 +463,9 @@ async function loadData() {
     state.tickets = t; state.stats = s; state.alerts = a;
     state.segments = g; state.crews = c; state.live = true;
     state.heatmap = await fetch("/api/predictive/heatmap").then(r => r.ok ? r.json() : []).catch(() => []);
+    // The budget forecast needs the repair-failure model, which lives on the
+    // server; offline the panel falls back to client-side cost totals only.
+    state.budget = await fetch("/api/ml/budget").then(r => r.ok ? r.json() : null).catch(() => null);
   } catch {
     const d = window.CHAKRANETRA_DEMO;
     if (d) {
@@ -689,6 +696,131 @@ function drawPredictive() {
     (segs || `<div class="empty" style="padding:24px">No segments computed yet.</div>`);
 }
 
+
+/* ── Budget panel: the learned cost model ───────────────────────────────
+   The cost model runs in the browser, the same way the detector does, so a
+   hosted console with no API still prices every open ticket. What it cannot
+   do offline is the rework and uncertainty maths: that needs the repair-
+   failure model and the Monte Carlo, which stay server-side. The panel says
+   which of the two it is showing rather than quietly presenting a point
+   total as if it were a forecast.                                        */
+const OPEN_STATUSES = new Set(["OPEN","ASSIGNED","IN_PROGRESS","REOPENED"]);
+const HORIZONS = [30, 60, 90];
+
+function mlBadge() {
+  const st = costModelStatus();
+  if (!st.trained) {
+    return `<div class="card low"><h3>Cost model not trained</h3>
+      <p>Every figure below is the rules-engine estimate from
+      <code>config.yaml</code>. Record real repair costs with
+      <code>POST /api/tickets/{id}/cost</code>, then run
+      <code>python tools/train_models.py</code>.</p></div>`;
+  }
+  const m = st.metrics || {};
+  const provenance = st.isSynthetic
+    ? `<div class="card critical"><h3>Trained on synthetic data
+         <span class="chip s4">demo only</span></h3>
+       <p>These predictions come from a model fit to
+       <code>roadlens/ml/bootstrap.py</code>'s simulated city. They demonstrate
+       that the machinery works. They say nothing about any real city's repair
+       costs, and no figure here should be quoted as if they did.</p></div>`
+    : `<div class="card low"><h3>Trained on recorded repairs
+         <span class="chip s1">observed</span></h3>
+       <p>Fit to ${esc(String(m.labelled_rows ?? "?"))} repairs with invoiced
+       costs from this database.</p></div>`;
+
+  return provenance + `
+    <div class="kv" style="margin:10px 2px 4px">
+      <span>held-out error <b>INR ${inr(m.model_mae_inr)}</b></span>
+      <span>rules-engine error <b>INR ${inr(m.rules_mae_inr)}</b></span>
+      <span>improvement <b>${esc(String(m.mae_improvement_pct ?? "-"))}%</b></span>
+      <span>${Math.round((m.interval_level ?? 0.9) * 100)}% interval <b>±${esc(String(m.interval_half_width_pct ?? "-"))}%</b></span>
+      <span>trees <b>${esc(String(m.trees ?? "-"))}</b></span>
+    </div>`;
+}
+
+function horizonCards() {
+  // Live API: the full forecast, rework and simulated band included.
+  if (state.budget && state.budget.horizons) {
+    return HORIZONS.map(h => {
+      const w = state.budget.horizons[h + "_day"];
+      if (!w) return "";
+      return `<div class="card ${h === 30 ? "critical" : h === 60 ? "high" : "medium"}">
+        <h3>Next ${h} days <span class="chip ${h === 30 ? "s4" : h === 60 ? "s3" : "s2"}">${w.tickets} ticket(s)</span></h3>
+        <p style="font-size:22px;font-weight:700;margin:6px 0">INR ${inr(w.total_inr)}</p>
+        <div class="kv">
+          <span>repairs <b>INR ${inr(w.point_inr)}</b></span>
+          <span>expected rework <b>INR ${inr(w.expected_rework_inr)}</b></span>
+          <span>p10-p90 <b>INR ${inr(w.p10_inr)} - ${inr(w.p90_inr)}</b></span>
+        </div>
+      </div>`;
+    }).join("");
+  }
+
+  // Offline: cost predictions only, and it says so.
+  const now = Date.now();
+  const open = state.tickets.filter(t => OPEN_STATUSES.has(t.status));
+  return HORIZONS.map(h => {
+    const inWindow = open.filter(t => {
+      const days = (new Date(t.sla_due_at).getTime() - now) / 86400000;
+      return days <= h;
+    });
+    const total = inWindow.reduce((sum, t) => sum + predictCost(t).predicted_inr, 0);
+    const low = inWindow.reduce((sum, t) => sum + (predictCost(t).low_inr ?? predictCost(t).predicted_inr), 0);
+    const high = inWindow.reduce((sum, t) => sum + (predictCost(t).high_inr ?? predictCost(t).predicted_inr), 0);
+    return `<div class="card ${h === 30 ? "critical" : h === 60 ? "high" : "medium"}">
+      <h3>Next ${h} days <span class="chip ${h === 30 ? "s4" : h === 60 ? "s3" : "s2"}">${inWindow.length} ticket(s)</span></h3>
+      <p style="font-size:22px;font-weight:700;margin:6px 0">INR ${inr(total)}</p>
+      <div class="kv">
+        <span>per-ticket range <b>INR ${inr(low)} - ${inr(high)}</b></span>
+        <span style="opacity:.75">rework risk and the simulated band need the API</span>
+      </div>
+    </div>`;
+  }).join("");
+}
+
+function ticketCostRows() {
+  const open = state.tickets.filter(t => OPEN_STATUSES.has(t.status));
+  if (!open.length) return `<div class="empty" style="padding:24px">No open tickets to price.</div>`;
+
+  return open
+    .map(t => ({ t, p: predictCost(t) }))
+    .sort((a, b) => b.p.predicted_inr - a.p.predicted_inr)
+    .map(({ t, p }) => {
+      const delta = p.delta_vs_rules_pct;
+      const arrow = p.source === "rules" ? "" :
+        `<span style="color:${delta >= 0 ? "#FF9330" : "#6FA8DC"}">${delta >= 0 ? "+" : ""}${delta}% vs rule</span>`;
+      return `<div class="card ${esc(String(t.severity_label || "").toLowerCase())}">
+        <h3>${esc(t.id)} <span class="chip s${t.severity_level}">${esc(t.severity_label)}</span></h3>
+        <div class="kv">
+          <span>model <b>INR ${inr(p.predicted_inr)}</b></span>
+          ${p.low_inr != null ? `<span>${Math.round((p.interval_level ?? 0.9)*100)}% range <b>INR ${inr(p.low_inr)} - ${inr(p.high_inr)}</b></span>` : ""}
+          <span>rule <b>INR ${inr(p.rules_inr)}</b></span>
+          ${arrow}
+          <span>road <b>${esc(t.road_class || "arterial")}</b></span>
+        </div>
+      </div>`;
+    }).join("");
+}
+
+function drawBudget() {
+  const open = state.tickets.filter(t => OPEN_STATUSES.has(t.status));
+  $("c-budget").textContent = open.length;
+  $("panel-budget").innerHTML =
+    mlBadge() +
+    `<div class="section-label">Forecast horizons</div>` + horizonCards() +
+    `<div class="section-label">Open tickets, priced by the model</div>` + ticketCostRows();
+}
+
+/** One line for the ticket drawer: what the model says, versus the rule. */
+function drawerCostLine(t) {
+  const p = predictCost(t);
+  if (p.source === "rules") return "INR " + inr(p.predicted_inr) + " (model untrained)";
+  const range = p.low_inr != null ? ` (INR ${inr(p.low_inr)}-${inr(p.high_inr)})` : "";
+  const tag = p.is_synthetic_model ? " · synthetic model" : "";
+  return `INR ${inr(p.predicted_inr)}${range}, ${p.delta_vs_rules_pct >= 0 ? "+" : ""}${p.delta_vs_rules_pct}% vs rule${tag}`;
+}
+
 /* ── Crew panel ─────────────────────────────────────────────────────── */
 function drawCrews() {
   const el = $("panel-crews");
@@ -736,7 +868,8 @@ function openDrawer(id) {
     ["Department", t.department],
     ["Assigned", t.assigned_to || "unassigned"],
     ["Priority", `${t.priority_score}/100`],
-    ["Estimated cost", "INR " + inr(t.est_cost_inr)],
+    ["Estimated cost (rule)", "INR " + inr(t.est_cost_inr)],
+    ["Predicted cost (model)", drawerCostLine(t)],
     ["Frame area", ((t.area_ratio ?? 0) * 100).toFixed(2) + "% of frame"],
     ["Model confidence", ((t.confidence ?? 0) * 100).toFixed(0) + "%"],
     ["Sightings merged", t.sightings],
@@ -782,9 +915,9 @@ function drawFilters() {
 }
 
 function setView(view, push = true) {
-  if (!["queue","predict","crews","scan"].includes(view)) view = "queue";
+  if (!["queue","predict","crews","budget","scan"].includes(view)) view = "queue";
   state.view = view;
-  for (const v of ["queue","predict","crews","scan"]) {
+  for (const v of ["queue","predict","crews","budget","scan"]) {
     $("tab-" + v).setAttribute("aria-selected", String(v === view));
     $("panel-" + v).classList.toggle("active", v === view);
   }
@@ -1001,7 +1134,7 @@ async function runScan(blobOrUrl, label) {
     }
     saveOverrides();
     recomputeLocalStats();
-    drawFilters(); drawList(); drawMarkers(); drawPredictive();
+    drawFilters(); drawList(); drawMarkers(); drawPredictive(); drawBudget();
     $("c-queue").textContent = visibleTickets().length;
   } catch (err) {
     console.error(err);
@@ -1046,6 +1179,7 @@ document.addEventListener("click", e => {
   if (e.target.closest("#tab-queue"))   return setView("queue");
   if (e.target.closest("#tab-predict")) return setView("predict");
   if (e.target.closest("#tab-crews"))   return setView("crews");
+  if (e.target.closest("#tab-budget"))  return setView("budget");
   if (e.target.closest("#tab-scan"))    return setView("scan");
   if (e.target.closest("#btn-heat"))    return toggleHeat();
   if (e.target.closest("#btn-fit"))     return drawMarkers();
@@ -1080,7 +1214,7 @@ document.addEventListener("input", e => { if (e.target.id === "q") drawList(); }
   initMap();
   await loadData();
   drawFilters(); drawStats(); drawList(); drawMarkers();
-  drawPredictive(); drawCrews();
+  drawPredictive(); drawCrews(); drawBudget();
   const h = location.hash.slice(1);
   if (h.startsWith("t/")) { setView("queue", false); const id = decodeURIComponent(h.slice(2)); selectTicket(id); openDrawer(id); }
   else setView(h || "queue");
