@@ -1,0 +1,52 @@
+{
+ "provenance": {
+  "training_data": "synthetic_bootstrap",
+  "generator": "roadlens.ml.bootstrap.seed",
+  "seed": 20260904,
+  "n_tickets": 600,
+  "warning": "Simulated data. Demonstrates the modelling machinery, not any real city's repair costs.",
+  "observed_labelled_costs": 0,
+  "observed_growth_pairs": 0,
+  "observed_repair_outcomes": 1,
+  "trained_at": "2026-09-04T07:00:20.095268+00:00"
+ },
+ "metrics": {
+  "cost": {
+   "status": "trained",
+   "labelled_rows": 470,
+   "fit_rows": 329,
+   "calibration_rows": 141,
+   "model_mae_inr": 867,
+   "rules_mae_inr": 2465,
+   "mae_improvement_pct": 64.8,
+   "mape": 0.1116,
+   "interval_level": 0.9,
+   "interval_half_width_pct": 26.5,
+   "trees": 300
+  },
+  "degradation": {
+   "status": "trained",
+   "observation_pairs": 1504,
+   "fit_rows": 1053,
+   "calibration_rows": 451,
+   "model_mae": 0.005708,
+   "constant_mae": 0.007364,
+   "mae_improvement_pct": 22.5,
+   "median_growth_pct_per_day": 0.944,
+   "interval_level": 0.8,
+   "trees": 250
+  },
+  "failure": {
+   "status": "trained",
+   "uncensored_rows": 443,
+   "fit_rows": 310,
+   "calibration_rows": 133,
+   "auc": 0.7221,
+   "brier": 0.2014,
+   "base_rate_brier": 0.2263,
+   "observed_failure_rate": 0.3521,
+   "crews_known": 5,
+   "trees": 200
+  }
+ }
+}

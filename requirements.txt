@@ -10,6 +10,10 @@ fastapi>=0.141
 uvicorn>=0.30
 python-multipart>=0.0.9   # file uploads
 pyyaml>=6.0               # configuration management
+# roadlens/ml is written directly against numpy (the gradient-boosted-tree
+# learner). It arrived transitively via torch/opencv before; a direct
+# dependency belongs in the file that declares it.
+numpy>=1.24
 pytest>=7.0               # testing
 pytest-cov>=4.0           # test coverage
 
