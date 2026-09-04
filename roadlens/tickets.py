@@ -24,7 +24,7 @@ import json
 import sqlite3
 from datetime import datetime, timedelta, timezone
 
-from .dedup import DefectCluster
+from .dedup import DefectCluster, _merge_radius, haversine_m
 from .severity import assess
 from .logger import get_logger
 
@@ -70,9 +70,39 @@ CREATE TABLE IF NOT EXISTS tickets (
     status_history TEXT,
     recurrence_count INTEGER DEFAULT 0,
     repair_quality_score REAL DEFAULT 1.0,
-    last_recurrence_at TEXT
+    last_recurrence_at TEXT,
+    road_class TEXT DEFAULT 'arterial',
+    actual_cost_inr INTEGER,
+    repaired_at TEXT
 );
 """
+
+# Every sighting of a defect, not just the first. `tickets.area_ratio` keeps
+# only the largest area ever seen, which is the right number for severity but
+# destroys the one thing a degradation model needs: how fast the hole grew
+# between two dates. This table is that history.
+OBSERVATIONS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS defect_observations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ticket_id TEXT NOT NULL,
+    observed_at TEXT NOT NULL,
+    area_ratio REAL NOT NULL,
+    confidence REAL,
+    severity_level INTEGER,
+    source TEXT,
+    UNIQUE (ticket_id, observed_at, source)
+);
+"""
+
+# Columns added after v2.0 shipped. SQLite has no "ADD COLUMN IF NOT EXISTS",
+# and an existing roadlens.db predates all of them, so they are applied by
+# comparing against PRAGMA table_info rather than by catching the error --
+# catching it would also swallow a genuinely malformed ALTER.
+_MIGRATIONS = {
+    "road_class": "ALTER TABLE tickets ADD COLUMN road_class TEXT DEFAULT 'arterial'",
+    "actual_cost_inr": "ALTER TABLE tickets ADD COLUMN actual_cost_inr INTEGER",
+    "repaired_at": "ALTER TABLE tickets ADD COLUMN repaired_at TEXT",
+}
 
 
 class TicketStore:
@@ -84,9 +114,20 @@ class TicketStore:
         self.conn = sqlite3.connect(db_path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
         self.conn.execute(SCHEMA)
+        self.conn.execute(OBSERVATIONS_SCHEMA)
+        self._migrate()
         self.conn.commit()
 
-    def create_from_cluster(self, cluster: DefectCluster, now: datetime | None = None) -> dict:
+    def _migrate(self) -> None:
+        """Bring an older roadlens.db up to the current column set."""
+        existing = {r["name"] for r in self.conn.execute("PRAGMA table_info(tickets)")}
+        for column, ddl in _MIGRATIONS.items():
+            if column not in existing:
+                self.conn.execute(ddl)
+                logger.info("Schema migrated", column=column)
+
+    def create_from_cluster(self, cluster: DefectCluster, now: datetime | None = None,
+                            road_class: str = "arterial") -> dict:
         """One unique physical defect -> one ticket."""
         now = now or datetime.now(timezone.utc)
 
@@ -124,12 +165,20 @@ class TicketStore:
             "recurrence_count": 0,
             "repair_quality_score": 1.0,
             "last_recurrence_at": None,
+            "road_class": road_class,
+            "actual_cost_inr": None,
+            "repaired_at": None,
         }
         self.conn.execute(
             f"INSERT OR REPLACE INTO tickets ({','.join(row)}) VALUES ({','.join('?' * len(row))})",
             list(row.values()),
         )
         self.conn.commit()
+        self.record_observation(
+            ticket_id, cluster.max_area_ratio, cluster.max_confidence,
+            a.severity_level, now=now,
+            source=(cluster.sources[0] if cluster.sources else None),
+        )
         logger.info("Ticket created", ticket_id=ticket_id, severity=a.severity_label, defect_type=cluster.defect_type)
         return row
 
@@ -143,9 +192,16 @@ class TicketStore:
         history = json.loads(row["status_history"])
         history.append({"status": status, "at": datetime.now(timezone.utc).isoformat(), "note": note})
 
+        # First transition into FIXED starts the repair-monitoring clock; a
+        # later REOPENED -> FIXED must not reset it, or the failure model
+        # would measure the age of the newest patch against the oldest defect.
+        repaired_at = row.get("repaired_at") or (
+            datetime.now(timezone.utc).isoformat() if status == "FIXED" else None
+        )
         self.conn.execute(
-            "UPDATE tickets SET status=?, status_history=?, assigned_to=COALESCE(?, assigned_to) WHERE id=?",
-            (status, json.dumps(history), assigned_to, ticket_id),
+            "UPDATE tickets SET status=?, status_history=?, "
+            "assigned_to=COALESCE(?, assigned_to), repaired_at=? WHERE id=?",
+            (status, json.dumps(history), assigned_to, repaired_at, ticket_id),
         )
         self.conn.commit()
         logger.info("Ticket status updated", ticket_id=ticket_id, status=status, assigned_to=assigned_to)
@@ -166,6 +222,156 @@ class TicketStore:
         )
         self.conn.commit()
         logger.warning("Defect recurrence recorded", ticket_id=ticket_id, recurrence_count=new_count, quality_score=quality_score)
+        return self.get(ticket_id)
+
+    OPEN_STATUSES = ("OPEN", "ASSIGNED", "IN_PROGRESS", "REOPENED")
+
+    def find_open_at_location(self, lat: float, lon: float, defect_type: str,
+                              radius_m: float | None = None) -> str | None:
+        """The still-open ticket for this same physical defect, if there is one.
+
+        `cluster_detections` deduplicates *within* one scan. Across scans it
+        could not: a second pass over the same road tomorrow produced a second
+        ticket for the same hole, and the queue filled with duplicates of the
+        defect a crew had already been sent to.
+
+        It also made the degradation model unreachable on real data. Growth is
+        measured between two sightings of *one* ticket, and every re-sighting
+        was landing on a brand-new id, so no ticket ever accumulated a second
+        observation. The model could only ever have trained on simulated data.
+        """
+        radius = _merge_radius() if radius_m is None else float(radius_m)
+        rows = self.conn.execute(
+            "SELECT id, lat, lon FROM tickets WHERE defect_type=? AND status IN "
+            f"({','.join('?' * len(self.OPEN_STATUSES))})",
+            (defect_type, *self.OPEN_STATUSES),
+        ).fetchall()
+
+        best_id, best_dist = None, None
+        for r in rows:
+            if r["lat"] is None or r["lon"] is None:
+                continue
+            dist = haversine_m(r["lat"], r["lon"], lat, lon)
+            if dist <= radius and (best_dist is None or dist < best_dist):
+                best_id, best_dist = r["id"], dist
+        return best_id
+
+    def record_growth(self, ticket_id: str, cluster: DefectCluster,
+                      now: datetime | None = None) -> dict:
+        """Fold a fresh sighting into an existing open ticket.
+
+        The sighting is always appended to the growth history. The ticket's
+        own numbers are only revised upward: `area_ratio` is documented as the
+        worst size ever seen, and letting a distant or partly-occluded frame
+        shrink it would quietly downgrade a defect's severity — and its SLA —
+        on the strength of a bad camera angle.
+        """
+        now = now or datetime.now(timezone.utc)
+        row = self.get(ticket_id)
+        if row is None:
+            raise KeyError(f"No ticket {ticket_id}")
+
+        area = max(float(row["area_ratio"] or 0.0), float(cluster.max_area_ratio))
+        confidence = max(float(row["confidence"] or 0.0), float(cluster.max_confidence))
+        sightings = int(row["sightings"] or 0) + int(cluster.sightings)
+        a = assess(cluster.defect_type, area, confidence, sightings)
+
+        self.record_observation(
+            ticket_id, cluster.max_area_ratio, cluster.max_confidence,
+            assess(cluster.defect_type, cluster.max_area_ratio,
+                   cluster.max_confidence, cluster.sightings).severity_level,
+            now=now, source=(cluster.sources[0] if cluster.sources else None),
+        )
+
+        sources = json.loads(row["sources"] or "[]")
+        for src in cluster.sources:
+            if src not in sources:
+                sources.append(src)
+
+        self.conn.execute(
+            "UPDATE tickets SET area_ratio=?, confidence=?, sightings=?, "
+            "severity_level=?, severity_label=?, priority_score=?, "
+            "est_cost_inr=?, department=?, sources=? WHERE id=?",
+            (area, confidence, sightings, a.severity_level, a.severity_label,
+             a.priority_score, a.est_cost_inr, a.department,
+             json.dumps(sources), ticket_id),
+        )
+        self.conn.commit()
+
+        if a.severity_level > (row["severity_level"] or 0):
+            history = json.loads(row["status_history"] or "[]")
+            history.append({
+                "status": row["status"], "at": now.isoformat(),
+                "note": f"Re-sighted and grown: severity raised to "
+                        f"{a.severity_label} (L{a.severity_level})",
+            })
+            self.conn.execute("UPDATE tickets SET status_history=? WHERE id=?",
+                              (json.dumps(history), ticket_id))
+            self.conn.commit()
+            logger.warning("Defect grew between scans", ticket_id=ticket_id,
+                           severity=a.severity_label, area_ratio=area)
+        else:
+            logger.info("Existing defect re-sighted", ticket_id=ticket_id,
+                        sightings=sightings)
+        return self.get(ticket_id)
+
+    def record_observation(self, ticket_id: str, area_ratio: float,
+                           confidence: float | None = None,
+                           severity_level: int | None = None,
+                           now: datetime | None = None,
+                           source: str | None = None) -> None:
+        """Append one sighting to the defect's growth history.
+
+        Silently ignores a repeat of the same (ticket, timestamp, source),
+        so re-running a scan over the same footage does not manufacture
+        growth data out of duplicate rows.
+        """
+        now = now or datetime.now(timezone.utc)
+        self.conn.execute(
+            """INSERT OR IGNORE INTO defect_observations
+               (ticket_id, observed_at, area_ratio, confidence, severity_level, source)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (ticket_id, now.isoformat(), float(area_ratio),
+             confidence, severity_level, source),
+        )
+        self.conn.commit()
+
+    def observations(self, ticket_id: str | None = None) -> list[dict]:
+        """Sighting history, oldest first — the degradation model's input."""
+        if ticket_id is None:
+            rows = self.conn.execute(
+                "SELECT * FROM defect_observations ORDER BY ticket_id, observed_at"
+            )
+        else:
+            rows = self.conn.execute(
+                "SELECT * FROM defect_observations WHERE ticket_id=? ORDER BY observed_at",
+                (ticket_id,),
+            )
+        return [dict(r) for r in rows]
+
+    def record_actual_cost(self, ticket_id: str, actual_cost_inr: int,
+                           now: datetime | None = None) -> dict:
+        """Record what the repair actually cost.
+
+        This is the label the cost model learns from, and the only reason it
+        is ever more than a restatement of the rules formula. Until a city
+        starts entering these, `roadlens.ml` correctly reports that it is
+        falling back to the rules engine.
+        """
+        if actual_cost_inr is None or int(actual_cost_inr) <= 0:
+            raise ValueError("actual_cost_inr must be a positive number of rupees")
+        row = self.get(ticket_id)
+        if row is None:
+            raise KeyError(f"No ticket {ticket_id}")
+        now = now or datetime.now(timezone.utc)
+        self.conn.execute(
+            "UPDATE tickets SET actual_cost_inr=?, repaired_at=COALESCE(repaired_at, ?) WHERE id=?",
+            (int(actual_cost_inr), now.isoformat(), ticket_id),
+        )
+        self.conn.commit()
+        logger.info("Actual repair cost recorded", ticket_id=ticket_id,
+                    actual_cost_inr=int(actual_cost_inr),
+                    est_cost_inr=row.get("est_cost_inr"))
         return self.get(ticket_id)
 
     def get(self, ticket_id: str) -> dict | None:

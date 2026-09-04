@@ -19,6 +19,12 @@ Endpoints:
     GET  /api/predictive/alerts     predictive maintenance alerts
     GET  /api/predictive/heatmap    risk heatmap data
     GET  /api/predictive/crews      crew performance scores
+    POST /api/tickets/{id}/cost     record what a repair actually cost
+    GET  /api/ml/status             which models are trained, and on what data
+    GET  /api/ml/cost/{id}          predicted repair cost + conformal interval
+    GET  /api/ml/forecast/{id}      days until the next severity band
+    GET  /api/ml/failure/{id}       P(this repair comes back)
+    GET  /api/ml/budget             30/60/90-day spend forecast
 """
 
 from __future__ import annotations
@@ -43,6 +49,7 @@ from roadlens.tickets import TicketStore, STATUSES     # noqa: E402
 from roadlens.predictive import PredictiveEngine       # noqa: E402
 from roadlens.logger import get_logger                 # noqa: E402
 from roadlens.config import get_config                 # noqa: E402
+from roadlens.ml.registry import get_registry, reset_registry, ModelRegistry  # noqa: E402
 
 logger = get_logger("api")
 
@@ -150,6 +157,35 @@ class StatusUpdate(BaseModel):
     assigned_to: str | None = None
 
 
+class CostReport(BaseModel):
+    """What a repair actually cost — the label the cost model learns from."""
+
+    actual_cost_inr: int
+    note: str = ""
+
+    @field_validator("actual_cost_inr")
+    @classmethod
+    def validate_cost(cls, v: int) -> int:
+        if v <= 0:
+            raise ValueError("actual_cost_inr must be a positive number of rupees")
+        # A typo of a few extra zeroes in a public, unauthenticated endpoint
+        # would drag the whole trained model with it, and one bad label is
+        # much harder to find later than one rejected request.
+        if v > 100_000_000:
+            raise ValueError("actual_cost_inr above Rs 10 crore looks like a typo")
+        return v
+
+
+# Retraining reads the whole ticket table and fits three ensembles. That is
+# fine on a laptop and a denial-of-service vector on a public demo host, so
+# the endpoint exists but is off unless the operator turns it on.
+TRAINING_ENABLED = os.getenv("ROADLENS_ALLOW_TRAINING", "").lower() in ("1", "true", "yes")
+
+
+def _ml():
+    return get_registry(get_store(), get_predictive())
+
+
 # An exception handler must RETURN a response. Raising HTTPException from
 # inside one escapes the handler chain, so these used to turn every ValueError
 # into an unhandled 500 with a traceback instead of the intended 400.
@@ -208,7 +244,21 @@ async def scan_image(
         detections = get_detector().detect_image(tmp_path, save_annotated_to=annotated)
         attach_gps_manual(detections, lat, lon)
         clusters = cluster_detections(detections)
-        tickets = [get_store().create_from_cluster(c) for c in clusters]
+
+        # A re-scan of a road already in the queue must not file the same
+        # pothole twice. A cluster landing within the merge radius of an
+        # existing open ticket for the same defect type is another sighting of
+        # that defect, so it is appended to that ticket's growth history
+        # instead of becoming a duplicate.
+        tickets, created_ids, updated_ids = [], [], []
+        for c in clusters:
+            existing = get_store().find_open_at_location(c.lat, c.lon, c.defect_type)
+            if existing:
+                tickets.append(get_store().record_growth(existing, c))
+                updated_ids.append(existing)
+            else:
+                tickets.append(get_store().create_from_cluster(c))
+                created_ids.append(tickets[-1]["id"])
 
         # Close the accountability loop: if this spot was repaired recently,
         # a fresh detection here is a failed repair, not just a new pothole.
@@ -229,12 +279,16 @@ async def scan_image(
                 recurrences.append(hit)
 
         logger.info("Scan completed", defects_found=len(detections),
-                    unique_defects=len(clusters), tickets_created=len(tickets),
-                    recurrences=len(recurrences))
+                    unique_defects=len(clusters), tickets_created=len(created_ids),
+                    tickets_updated=len(updated_ids), recurrences=len(recurrences))
         return {
             "defects_found": len(detections),
             "unique_defects": len(clusters),
-            "tickets_created": [t["id"] for t in tickets],
+            "tickets_created": created_ids,
+            # Re-sightings of defects already in the queue. Each one adds a
+            # point to that defect's growth history, which is what the
+            # degradation model trains on.
+            "tickets_updated": updated_ids,
             "recurrences": recurrences,
             "annotated_image": os.path.basename(annotated) if detections else None,
         }
@@ -334,6 +388,107 @@ def risk_segments():
         }
         for s in segments
     ]
+
+
+# ---------------------------------------------------------------------------
+# Learned models (roadlens.ml)
+# ---------------------------------------------------------------------------
+
+@app.post("/api/tickets/{ticket_id}/cost")
+def report_actual_cost(ticket_id: str, body: CostReport):
+    """Record what a repair actually cost.
+
+    This is the endpoint that makes the cost model more than a restatement of
+    the rules formula. Until a city posts real invoices here, every cost
+    prediction is labelled `source: "rules"` or trained on the synthetic
+    bootstrap corpus, and says so.
+    """
+    try:
+        ticket = get_store().record_actual_cost(ticket_id, body.actual_cost_inr)
+    except KeyError:
+        raise HTTPException(404, f"No ticket {ticket_id}")
+    return {
+        "ticket": ticket,
+        "rules_estimate_inr": ticket.get("est_cost_inr"),
+        "actual_cost_inr": ticket.get("actual_cost_inr"),
+        "note": "Retrain with `python tools/train_models.py` to fold this into the model.",
+    }
+
+
+@app.get("/api/ml/status")
+def ml_status():
+    """Which models are trained, on what data, and how well they scored.
+
+    Deliberately the most detailed endpoint in the API. A prediction about
+    public money should come with its own audit trail attached, and
+    `is_synthetic` is the field the dashboard renders as a warning badge.
+    """
+    return _ml().status()
+
+
+@app.get("/api/ml/cost/{ticket_id}")
+def ml_cost(ticket_id: str, explain: bool = True):
+    """Predicted repair cost with a conformal interval, and why."""
+    ticket = get_store().get(ticket_id)
+    if not ticket:
+        raise HTTPException(404, f"No ticket {ticket_id}")
+    registry = _ml()
+    out = registry.cost.predict(ticket)
+    out["is_synthetic_model"] = registry.status()["is_synthetic"]
+    if explain:
+        out["explanation"] = registry.cost.explain(ticket)
+    return out
+
+
+@app.get("/api/ml/forecast/{ticket_id}")
+def ml_forecast(ticket_id: str):
+    """Days until this defect reaches the next severity band."""
+    ticket = get_store().get(ticket_id)
+    if not ticket:
+        raise HTTPException(404, f"No ticket {ticket_id}")
+    registry = _ml()
+    out = registry.degradation.forecast(ticket)
+    out["observations"] = len(get_store().observations(ticket_id))
+    out["is_synthetic_model"] = registry.status()["is_synthetic"]
+    return out
+
+
+@app.get("/api/ml/failure/{ticket_id}")
+def ml_failure(ticket_id: str, crew: str | None = None):
+    """Probability this repair fails and the defect returns."""
+    ticket = get_store().get(ticket_id)
+    if not ticket:
+        raise HTTPException(404, f"No ticket {ticket_id}")
+    registry = _ml()
+    out = registry.failure.predict(ticket, crew=crew)
+    out["is_synthetic_model"] = registry.status()["is_synthetic"]
+    return out
+
+
+@app.get("/api/ml/budget")
+def ml_budget(group_by: str = "department"):
+    """30/60/90-day spend forecast with a simulated uncertainty band."""
+    if group_by not in ("department", "severity_label", "defect_type", "road_class"):
+        raise HTTPException(400, "group_by must be one of: department, "
+                                 "severity_label, defect_type, road_class")
+    registry = _ml()
+    out = registry.budget.forecast(get_store().list(), group_by=group_by)
+    out["is_synthetic_model"] = registry.status()["is_synthetic"]
+    return out
+
+
+@app.post("/api/ml/train")
+def ml_train():
+    """Retrain from the live database. Off unless ROADLENS_ALLOW_TRAINING is set."""
+    if not TRAINING_ENABLED:
+        raise HTTPException(
+            403, "Training is disabled on this host. Set ROADLENS_ALLOW_TRAINING=1 "
+                 "to enable it, or run `python tools/train_models.py` locally."
+        )
+    registry = ModelRegistry.train_from_store(get_store(), get_predictive())
+    registry.save()
+    reset_registry()
+    return registry.status()
 
 
 app.mount("/evidence", StaticFiles(directory=OUTPUT_DIR), name="evidence")
