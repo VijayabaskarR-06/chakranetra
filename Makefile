@@ -1,4 +1,4 @@
-.PHONY: install test lint demo train run docker-up docker-down clean
+.PHONY: install test lint demo demo-video train run docker-up docker-down clean
 
 install:
 	pip install -r requirements.txt
@@ -22,6 +22,12 @@ train:
 
 run:
 	uvicorn server.app:app --reload
+
+# Start this in a second terminal against a running `make run` / uvicorn to
+# watch tickets file themselves with no one clicking Scan -- see the README's
+# "Video: the actual dashcam flow" section.
+demo-video:
+	python tools/simulate_dashcam.py
 
 docker-up:
 	docker compose up --build

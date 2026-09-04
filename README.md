@@ -171,7 +171,8 @@ chakranetra/
 ├── tools/
 │   ├── train_models.py        `make train` — fits the models, prints the metrics
 │   ├── generate_ml_js.py      exports the cost model for the browser
-│   └── generate_rules_js.py   exports the severity rules for the browser
+│   ├── generate_rules_js.py   exports the severity rules for the browser
+│   └── simulate_dashcam.py    `make demo-video` — an unattended fleet uploading footage
 ├── tests/                     comprehensive test suite
 ├── .github/workflows/ci.yml   CI/CD pipeline
 └── docs/ARCHITECTURE.md       data flow, module boundaries, design decisions
@@ -205,6 +206,7 @@ docker compose up --build
 | Endpoint | What it does |
 |---|---|
 | `POST /api/scan/image` | photo + lat/lon → detect → dedup → ticket(s) + annotated evidence; also re-opens a recently-repaired ticket if the defect is back |
+| `POST /api/scan/video` | dashcam/CCTV clip + a GPS track (or a fixed lat/lon) → sampled frames → detect → dedup → ticket(s); a re-scan of an already-open ticket grows it instead of duplicating |
 | `GET /api/tickets` | work queue, sorted by priority (filter by status / department) |
 | `GET /api/tickets/{id}` | single ticket with full history |
 | `POST /api/tickets/{id}/status` | move a ticket through the civic workflow |
@@ -264,6 +266,70 @@ Each crew gets an average quality score across all their monitored repairs:
 - Below 0.5: Requires retraining
 
 ---
+
+---
+
+## Video: the actual dashcam flow
+
+`POST /api/scan/video` is the flow the README's opening line describes —
+"every vehicle becomes a road inspector" — done properly: upload a clip, get
+tickets, with no per-frame manual work.
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/scan/video \
+  -F "file=@trip.mp4" \
+  -F "gpx=@trip.gpx" \
+  -F "fps=30" \
+  -F "vehicle_id=KA-01-AB-1234"
+```
+
+It samples frames the same way `run_demo.py` always has
+(`detector.py:detect_video`, every 15th frame by default), turns
+`frame_index / fps` into a GPS position via the video's GPX track
+(`geo.py:attach_gps_from_track`), and then runs the exact same filing logic
+`/api/scan/image` uses (`_file_and_track` in `server/app.py`) — the two
+endpoints share it, so a photo and a clip land in the queue identically and
+are tested once. No GPX track? Pass `lat`/`lon` instead for a fixed CCTV
+camera; every defect in the clip pins to that one point, and the response
+says so (`gps_source: "manual"`).
+
+**The part worth calling out:** a cluster from the new clip is matched
+against tickets already OPEN nearby (`TicketStore.find_open_at_location`)
+before anything is created. Drive the same stretch of road twice and the
+second clip grows the first ticket's sighting history — larger area, more
+confidence, one more sighting — instead of filing the same pothole again.
+That growth history is what `roadlens/ml/`'s degradation model trains on;
+without it, growth data could only ever have come from the synthetic corpus.
+
+### See it happen without a human clicking anything
+
+```bash
+uvicorn server.app:app --reload          # terminal 1
+python tools/simulate_dashcam.py         # terminal 2
+```
+
+`simulate_dashcam.py` plays a fleet of vehicles that quietly upload footage
+on their own schedule — no browser, no clicking Scan. Every clip is built
+from real assets already in this repo (a few of `data/samples/`'s pothole
+photos stitched into a short `.mp4`, tagged with a genuine slice of
+`data/demo_route.gpx` re-based to that clip's own timeline), so the
+coordinates and the potholes are real; only "a camera driving past" is
+synthesised. Watch the terminal:
+
+```
+[12:56:04] KA-03-EF-4521  uploaded clip_0008.mp4 (8s, 5 frame(s) analyzed) -> 2 grew RL-POT-2026-0001, RL-POT-2026-0002  [second lap: re-scanning known road]
+```
+
+The route is 59 seconds long; once the simulated fleet reaches the end it
+starts a fresh lap, and the same road stretch — same photos, same GPS —
+produces the same tickets growing rather than duplicating. Open the
+dashboard in a third window and refresh it while the script runs: the queue
+fills in, unattended, while you watch.
+
+```bash
+python tools/simulate_dashcam.py --count 12 --interval 5   # a bounded demo run
+python tools/simulate_dashcam.py --help                    # every knob
+```
 
 ---
 
@@ -467,6 +533,16 @@ without either they skip rather than fail, so CI without node still passes. Run
   cost model's strongest feature, and today it defaults to `arterial` unless a city
   supplies it. Joining tickets against an existing road-network layer is the obvious
   next step and needs no model change.
+- **`tools/simulate_dashcam.py` is a labelled simulation of a device, not of data.**
+  The coordinates come from `data/demo_route.gpx`'s real recorded GPS and the
+  photos are the real sample dataset; only "a camera continuously driving past and
+  holding on each frame for a couple of seconds" is synthesised, because this repo
+  ships no actual dashcam footage. `POST /api/scan/video` itself has no such
+  caveat — point it at a real clip and a real GPX track and it behaves identically.
+- **`/api/scan/video` runs synchronously**, like `/api/scan/image` — a long clip on a
+  CPU-only host will hold the request open for as long as sampling and inference
+  take. Fine for the minutes-long clips this is built for; a fleet uploading
+  hours-long footage would want a job queue in front of it, not a bigger timeout.
 - **The bundled model detects potholes only.** The detector is a plug-in behind one
   interface — training YOLOv8 on a multi-class dataset extends coverage with zero
   changes elsewhere; department routing for those classes is already wired.

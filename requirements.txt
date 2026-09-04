@@ -14,6 +14,7 @@ pyyaml>=6.0               # configuration management
 # learner). It arrived transitively via torch/opencv before; a direct
 # dependency belongs in the file that declares it.
 numpy>=1.24
+requests>=2.31             # tools/simulate_dashcam.py posts clips to a running API
 pytest>=7.0               # testing
 pytest-cov>=4.0           # test coverage
 
